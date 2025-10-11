@@ -3,5 +3,33 @@ name = "speculant-graph"
 version = "0.0.1"
 description = "Graph drafts, LLM verifies"
 readme = "README.md"
-requires-python = ">=3.14"
-dependencies = []
+requires-python = ">=3.13"
+dependencies = [
+    "networkx>=3.5",
+    "transformers>=4.57.0",
+    "torch>=2.8.0",
+    "numpy>=2.3.3",
+    "loguru>=0.7.3",
+    "pydantic>=2.12.0",
+    "pydantic-settings>=2.11.0",
+    "pyvis>=0.3.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.4.2",
+    "pytest-cov>=7.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/speculant_graph"]
