@@ -32,6 +32,7 @@ def main():
         graph_config = GraphConfig(tokenizer_name=MODEL_NAME, hf_token=HF_TOKEN)
         builder = GraphBuilder(
             tokenizer_name=graph_config.tokenizer_name,
+            max_order=graph_config.max_order,
             chunk_size=graph_config.chunk_size,
             hf_token=graph_config.hf_token,
         )
@@ -42,7 +43,7 @@ def main():
         logger.info(f"Using existing graph: {graph_path}")
 
     verifier_config = VerifierConfig(
-        model_name=MODEL_NAME, acceptance_threshold=0.6, hf_token=HF_TOKEN
+        model_name=MODEL_NAME, acceptance_threshold=0.5, hf_token=HF_TOKEN
     )
     draft_config = DraftConfig(k=8, strategy="greedy")
 

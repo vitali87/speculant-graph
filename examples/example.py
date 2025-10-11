@@ -27,6 +27,7 @@ def main():
         graph_config = GraphConfig()
         builder = GraphBuilder(
             tokenizer_name=graph_config.tokenizer_name,
+            max_order=graph_config.max_order,
             chunk_size=graph_config.chunk_size,
         )
 

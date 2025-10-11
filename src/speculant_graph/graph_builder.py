@@ -12,15 +12,18 @@ class GraphBuilder:
     def __init__(
         self,
         tokenizer_name: str = "openai/gpt-oss-20b",
+        max_order: int = 5,
         chunk_size: int = 10000,
         hf_token: str | None = None,
     ):
         self.tokenizer_name = tokenizer_name
+        self.max_order = max_order
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, token=hf_token)
         self.chunk_size = chunk_size
         self.graph = nx.DiGraph()
         self.token_counts: dict[int, int] = {}
-        self.transition_counts: dict[tuple, int] = {}
+        self.ngram_transition_counts: dict[tuple, dict[int, int]] = {}
+        self.context_index: dict[tuple, int] = {}
 
     def build_from_files(self, corpus_files: list[str]) -> nx.DiGraph:
         logger.info(f"Building graph from {len(corpus_files)} file(s)...")
@@ -50,10 +53,18 @@ class GraphBuilder:
         for i, token_id in enumerate(token_ids):
             self.token_counts[token_id] = self.token_counts.get(token_id, 0) + 1
 
-            if i < len(token_ids) - 1:
-                next_token_id = token_ids[i + 1]
-                transition = (token_id, next_token_id)
-                self.transition_counts[transition] = self.transition_counts.get(transition, 0) + 1
+        for order in range(1, self.max_order + 1):
+            for i in range(len(token_ids) - order):
+                context = tuple(token_ids[i:i + order])
+                next_token = token_ids[i + order]
+
+                if context not in self.ngram_transition_counts:
+                    self.ngram_transition_counts[context] = {}
+
+                self.ngram_transition_counts[context][next_token] = \
+                    self.ngram_transition_counts[context].get(next_token, 0) + 1
+
+                self.context_index[context] = order
 
     def _calculate_probabilities(self) -> None:
         for token_id, count in self.token_counts.items():
@@ -65,31 +76,55 @@ class GraphBuilder:
                 count=count
             )
 
-        for (from_token, to_token), transition_count in self.transition_counts.items():
-            from_count = self.token_counts[from_token]
-            probability = transition_count / from_count
+        logger.info(f"Processing {len(self.ngram_transition_counts)} n-gram contexts...")
 
-            self.graph.add_edge(
-                from_token,
-                to_token,
-                weight=probability,
-                count=transition_count
-            )
+        for context, next_token_counts in self.ngram_transition_counts.items():
+            total_count = sum(next_token_counts.values())
+
+            for next_token, count in next_token_counts.items():
+                probability = count / total_count
+                order = len(context)
+
+                self.graph.add_edge(
+                    context,
+                    next_token,
+                    weight=probability,
+                    count=count,
+                    order=order
+                )
+
+        logger.debug(f"Built context index with {len(self.context_index)} unique n-grams")
 
     def save(self, filepath: str) -> None:
+        num_nodes_per_order = {}
+        num_edges_per_order = {}
+
+        for order in range(1, self.max_order + 1):
+            nodes_at_order = [n for n in self.graph.nodes() if isinstance(n, tuple) and len(n) == order]
+            edges_at_order = [e for e in self.graph.edges(data=True) if e[2].get('order') == order]
+            num_nodes_per_order[order] = len(nodes_at_order)
+            num_edges_per_order[order] = len(edges_at_order)
+
         metadata = {
             "graph": self.graph,
+            "context_index": self.context_index,
             "tokenizer_name": self.tokenizer_name,
             "tokenizer_version": self.tokenizer.name_or_path,
             "build_timestamp": datetime.now().isoformat(),
+            "max_order": self.max_order,
             "num_nodes": self.graph.number_of_nodes(),
             "num_edges": self.graph.number_of_edges(),
+            "num_nodes_per_order": num_nodes_per_order,
+            "num_edges_per_order": num_edges_per_order,
         }
 
         with open(filepath, 'wb') as f:
             pickle.dump(metadata, f)
 
         logger.info(f"Graph saved to {filepath}")
+        logger.info(f"Max order: {self.max_order}")
+        for order in range(1, self.max_order + 1):
+            logger.info(f"  Order {order}: {num_nodes_per_order[order]} contexts, {num_edges_per_order[order]} edges")
 
     @staticmethod
     def load(filepath: str, validate_tokenizer: bool = True) -> tuple:

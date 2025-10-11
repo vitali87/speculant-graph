@@ -21,10 +21,14 @@ class DraftGenerator:
     def __init__(
         self,
         graph: nx.DiGraph,
+        context_index: dict[tuple, int],
+        max_order: int,
         tokenizer_name: str = "openai/gpt-oss-20b",
         hf_token: str | None = None
     ):
         self.graph = graph
+        self.context_index = context_index
+        self.max_order = max_order
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, token=hf_token)
         self.most_frequent_token = self._find_most_frequent_token()
 
@@ -33,10 +37,11 @@ class DraftGenerator:
         most_frequent = None
 
         for node, data in self.graph.nodes(data=True):
-            count = data.get('count', 0)
-            if count > max_count:
-                max_count = count
-                most_frequent = node
+            if isinstance(node, int):
+                count = data.get('count', 0)
+                if count > max_count:
+                    max_count = count
+                    most_frequent = node
 
         logger.debug(f"Most frequent token: {most_frequent} (count: {max_count})")
         return most_frequent
@@ -50,35 +55,55 @@ class DraftGenerator:
         token_ids = self.tokenizer.encode(prompt)
 
         if len(token_ids) == 0:
-            logger.warning("Empty prompt, using most frequent token as start")
-            start_token = self.most_frequent_token
-        else:
-            start_token = token_ids[-1]
-            start_text = self.tokenizer.decode([start_token])
-            logger.debug(f"Last token of prompt: {start_token} ('{start_text}')")
+            logger.warning("Empty prompt, cannot draft")
+            return DraftResult(
+                token_ids=[],
+                strategy=strategy,
+                requested_k=k,
+                actual_length=0,
+                terminated_early=True,
+                termination_reason="Empty prompt"
+            )
 
-        if start_token not in self.graph:
-            start_text = self.tokenizer.decode([start_token])
-            fallback_text = self.tokenizer.decode([self.most_frequent_token])
-            logger.warning(f"Start token {start_token} ('{start_text}') not in graph, using most frequent token {self.most_frequent_token} ('{fallback_text}')")
-            start_token = self.most_frequent_token
+        logger.info(f"Drafting up to {k} tokens using {strategy} strategy from multi-order graph...")
 
-        logger.info(f"Drafting {k} tokens using {strategy} strategy...")
-        if strategy == "greedy":
-            draft_tokens = self._generate_greedy(start_token, k)
-        elif strategy == "sampling":
-            draft_tokens = self._generate_sampling(start_token, k)
-        else:
-            raise ValueError(f"Unknown strategy: {strategy}. Use 'greedy' or 'sampling'")
+        draft_tokens = []
+        current_context = token_ids.copy()
+
+        while len(draft_tokens) < k:
+            matched_order, context_tuple = self._find_highest_order_match(current_context)
+
+            if matched_order == 0:
+                logger.debug(f"No matching context found in any order, stopping draft")
+                break
+
+            logger.debug(f"Matched order-{matched_order} context: {context_tuple}")
+
+            if strategy == "greedy":
+                next_tokens = self._generate_greedy_from_context(context_tuple, k - len(draft_tokens))
+            elif strategy == "sampling":
+                next_tokens = self._generate_sampling_from_context(context_tuple, k - len(draft_tokens))
+            else:
+                raise ValueError(f"Unknown strategy: {strategy}. Use 'greedy' or 'sampling'")
+
+            if not next_tokens:
+                logger.debug(f"No more tokens from order-{matched_order} context, stopping draft")
+                break
+
+            draft_tokens.extend(next_tokens)
+            current_context.extend(next_tokens)
+
+            context_text = self.tokenizer.decode(next_tokens)
+            logger.debug(f"Generated {len(next_tokens)} tokens from order-{matched_order}: '{context_text}'")
 
         terminated_early = len(draft_tokens) < k
         termination_reason = None
 
         if terminated_early:
             if len(draft_tokens) == 0:
-                termination_reason = "No successors from start token"
+                termination_reason = "No matching context in any order"
             else:
-                termination_reason = "Hit dead end or EOS"
+                termination_reason = "Hit dead end in graph traversal"
 
         draft_text = self.tokenizer.decode(draft_tokens) if draft_tokens else "(empty)"
         token_ids_str = ", ".join(str(t) for t in draft_tokens)
@@ -93,44 +118,70 @@ class DraftGenerator:
             termination_reason=termination_reason
         )
 
-    def _generate_greedy(self, start_token: int, k: int) -> list[int]:
-        draft = []
-        current_token = start_token
+    def _find_highest_order_match(self, context: list[int]) -> tuple[int, tuple | None]:
+        for order in range(self.max_order, 0, -1):
+            if len(context) < order:
+                continue
 
-        for _ in range(k):
-            successors = list(self.graph.successors(current_token))
+            context_tuple = tuple(context[-order:])
+
+            if context_tuple in self.context_index:
+                return order, context_tuple
+
+        return 0, None
+
+    def _generate_greedy_from_context(self, context: tuple, max_tokens: int) -> list[int]:
+        draft = []
+        current_context = context
+
+        for _ in range(max_tokens):
+            successors = list(self.graph.successors(current_context))
 
             if not successors:
-                logger.debug(f"No successors for token {current_token}, stopping early")
                 break
 
             best_successor = max(
                 successors,
-                key=lambda t: self.graph[current_token][t]['weight']
+                key=lambda t: self.graph[current_context][t]['weight']
             )
 
             draft.append(best_successor)
-            current_token = best_successor
+
+            order = len(current_context)
+            if order < self.max_order:
+                current_context = current_context + (best_successor,)
+            else:
+                current_context = current_context[1:] + (best_successor,)
+
+            if current_context not in self.context_index:
+                break
 
         return draft
 
-    def _generate_sampling(self, start_token: int, k: int) -> list[int]:
+    def _generate_sampling_from_context(self, context: tuple, max_tokens: int) -> list[int]:
         draft = []
-        current_token = start_token
+        current_context = context
 
-        for _ in range(k):
-            successors = list(self.graph.successors(current_token))
+        for _ in range(max_tokens):
+            successors = list(self.graph.successors(current_context))
 
             if not successors:
-                logger.debug(f"No successors for token {current_token}, stopping early")
                 break
 
-            weights = [self.graph[current_token][s]['weight'] for s in successors]
+            weights = [self.graph[current_context][s]['weight'] for s in successors]
 
             sampled_successor = random.choices(successors, weights=weights, k=1)[0]
 
             draft.append(sampled_successor)
-            current_token = sampled_successor
+
+            order = len(current_context)
+            if order < self.max_order:
+                current_context = current_context + (sampled_successor,)
+            else:
+                current_context = current_context[1:] + (sampled_successor,)
+
+            if current_context not in self.context_index:
+                break
 
         return draft
 
@@ -144,4 +195,7 @@ class DraftGenerator:
         from speculant_graph.graph_builder import GraphBuilder
 
         graph, metadata = GraphBuilder.load(filepath)
-        return cls(graph, tokenizer_name, hf_token)
+        context_index = metadata.get("context_index", {})
+        max_order = metadata.get("max_order", 1)
+
+        return cls(graph, context_index, max_order, tokenizer_name, hf_token)

@@ -3,6 +3,7 @@ from pydantic_settings import BaseSettings
 
 
 class GraphConfig(BaseModel):
+    max_order: int = Field(default=5, ge=1, le=10)
     tokenizer_name: str = Field(default="openai/gpt-oss-20b")
     chunk_size: int = Field(default=10000, gt=0)
     hf_token: str | None = Field(default=None)
