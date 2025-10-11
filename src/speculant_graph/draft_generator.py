@@ -81,7 +81,8 @@ class DraftGenerator:
                 termination_reason = "Hit dead end or EOS"
 
         draft_text = self.tokenizer.decode(draft_tokens) if draft_tokens else "(empty)"
-        logger.info(f"Draft complete: {len(draft_tokens)}/{k} tokens = '{draft_text}'")
+        token_ids_str = ", ".join(str(t) for t in draft_tokens)
+        logger.info(f"Draft complete: {len(draft_tokens)}/{k} tokens = '{draft_text}' (IDs: {token_ids_str})")
 
         return DraftResult(
             token_ids=draft_tokens,

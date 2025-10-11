@@ -58,8 +58,9 @@ class SpeculativeDecoder:
         input_ids = self.tokenizer.encode(prompt, return_tensors="pt").to(self.device)
         generated_tokens = input_ids[0].tolist()
 
-        num_accepted = 0
-        num_rejected = 0
+        num_draft_accepted = 0
+        num_draft_rejected = 0
+        num_verifier_generated = 0
 
         while len(generated_tokens) - len(input_ids[0]) < generation_config.max_tokens:
             current_text = self.tokenizer.decode(generated_tokens)
@@ -75,12 +76,12 @@ class SpeculativeDecoder:
 
             if len(draft_result.token_ids) == 0:
                 logger.debug("Draft generator returned empty sequence, generating from verifier")
-                accepted_count, new_tokens = self._generate_from_verifier(
+                verifier_count, new_tokens = self._generate_from_verifier(
                     generated_tokens,
                     count=1,
                     temperature=generation_config.temperature
                 )
-                num_accepted += accepted_count
+                num_verifier_generated += verifier_count
                 generated_tokens.extend(new_tokens)
                 continue
 
@@ -90,8 +91,8 @@ class SpeculativeDecoder:
                 temperature=generation_config.temperature
             )
 
-            num_accepted += accepted_count
-            num_rejected += rejected_count
+            num_draft_accepted += accepted_count
+            num_draft_rejected += rejected_count
 
             if accepted_tokens:
                 accepted_text = self.tokenizer.decode(accepted_tokens)
@@ -103,29 +104,31 @@ class SpeculativeDecoder:
 
             if accepted_count == 0:
                 logger.debug("No tokens accepted, generating from verifier as fallback")
-                fallback_count, fallback_tokens = self._generate_from_verifier(
+                verifier_count, fallback_tokens = self._generate_from_verifier(
                     generated_tokens,
                     count=1,
                     temperature=generation_config.temperature
                 )
                 fallback_text = self.tokenizer.decode(fallback_tokens)
-                logger.info(f"Verifier generated fallback token: '{fallback_text}'")
-                num_accepted += fallback_count
+                fallback_ids_str = ", ".join(str(t) for t in fallback_tokens)
+                logger.info(f"Verifier generated fallback token: '{fallback_text}' (ID: {fallback_ids_str})")
+                num_verifier_generated += verifier_count
                 generated_tokens.extend(fallback_tokens)
 
         final_text = self.tokenizer.decode(generated_tokens)
-        total_proposed = num_accepted + num_rejected
-        acceptance_rate = num_accepted / total_proposed if total_proposed > 0 else 0.0
+        total_draft_proposed = num_draft_accepted + num_draft_rejected
+        acceptance_rate = num_draft_accepted / total_draft_proposed if total_draft_proposed > 0 else 0.0
 
         logger.info(f"Generation complete: {len(generated_tokens) - len(input_ids[0])} tokens generated")
-        logger.info(f"Acceptance rate: {acceptance_rate:.2%} ({num_accepted}/{total_proposed})")
+        logger.info(f"Draft acceptance rate: {acceptance_rate:.2%} ({num_draft_accepted}/{total_draft_proposed})")
+        logger.info(f"Breakdown: {num_draft_accepted} draft accepted, {num_draft_rejected} draft rejected, {num_verifier_generated} verifier generated")
 
         return GenerationResult(
             text=final_text,
             token_ids=generated_tokens,
             acceptance_rate=acceptance_rate,
-            num_accepted=num_accepted,
-            num_rejected=num_rejected,
+            num_accepted=num_draft_accepted,
+            num_rejected=num_draft_rejected,
             total_tokens=len(generated_tokens) - len(input_ids[0])
         )
 
@@ -143,7 +146,6 @@ class SpeculativeDecoder:
             probs = torch.softmax(logits, dim=-1)
 
         accepted_tokens = []
-        rejected_count = 0
 
         for draft_token in draft_tokens:
             draft_prob = probs[draft_token].item()
@@ -160,9 +162,9 @@ class SpeculativeDecoder:
                         logits = outputs.logits[0, -1, :] / temperature
                         probs = torch.softmax(logits, dim=-1)
             else:
-                rejected_count += 1
                 break
 
+        rejected_count = len(draft_tokens) - len(accepted_tokens)
         return len(accepted_tokens), rejected_count, accepted_tokens
 
     def _generate_from_verifier(

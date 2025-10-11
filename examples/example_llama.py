@@ -53,9 +53,10 @@ def main():
     )
 
     prompts = [
-        "What is a force majeure clause?",
-        "Explain indemnification clauses.",
-        "What are liquidated damages?",
+        "A termination clause outlines the circumstances under which"
+        # "What is a force majeure clause?",
+        # "Explain indemnification clauses.",
+        # "What are liquidated damages?",
     ]
 
     for prompt in prompts:
