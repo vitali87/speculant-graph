@@ -1,0 +1,7 @@
+[project]
+name = "speculant-graph"
+version = "0.0.1"
+description = "Graph drafts, LLM verifies"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = []
