@@ -15,10 +15,12 @@ def visualize_graph(
     output_html: str = "graph_viz.html",
     hf_token: str | None = None,
     max_nodes: int | None = None,
-    min_edge_weight: float = 0.0
+    min_edge_weight: float = 0.0,
 ):
     logger.info(f"Loading graph from: {graph_path}")
-    graph, metadata = GraphBuilder.load(graph_path)
+    graph, metadata = GraphBuilder.load(
+        graph_path, validate_tokenizer=True, expected_tokenizer=tokenizer_name
+    )
 
     logger.info("Graph metadata:")
     logger.info(f"  Tokenizer: {metadata['tokenizer_name']}")
@@ -29,12 +31,28 @@ def visualize_graph(
 
     if max_nodes and graph.number_of_nodes() > max_nodes:
         logger.info(f"Limiting visualization to top {max_nodes} most frequent tokens")
-        nodes_by_count = sorted(
-            graph.nodes(data=True),
-            key=lambda x: x[1].get('count', 0),
-            reverse=True
+
+        token_nodes = [
+            (node, data)
+            for node, data in graph.nodes(data=True)
+            if isinstance(node, int)
+        ]
+        token_nodes_sorted = sorted(
+            token_nodes, key=lambda x: x[1].get("count", 0), reverse=True
         )[:max_nodes]
-        selected_nodes = {node[0] for node in nodes_by_count}
+        selected_tokens = {node for node, _ in token_nodes_sorted}
+
+        context_nodes = set()
+        for from_node, to_node, edge_data in graph.edges(data=True):
+            if to_node in selected_tokens and isinstance(from_node, tuple):
+                weight = edge_data.get("weight", 0)
+                if weight >= min_edge_weight:
+                    context_nodes.add(from_node)
+
+        selected_nodes = selected_tokens | context_nodes
+        logger.info(
+            f"Selected {len(selected_tokens)} tokens and {len(context_nodes)} context nodes"
+        )
         subgraph = graph.subgraph(selected_nodes).copy()
     else:
         subgraph = graph
@@ -44,7 +62,7 @@ def visualize_graph(
         width="100%",
         bgcolor="#222222",
         font_color="white",
-        directed=True
+        directed=True,
     )
 
     net.barnes_hut(
@@ -52,7 +70,7 @@ def visualize_graph(
         central_gravity=0.3,
         spring_length=100,
         spring_strength=0.001,
-        damping=0.09
+        damping=0.09,
     )
 
     logger.info("Adding nodes to visualization...")
@@ -65,11 +83,11 @@ def visualize_graph(
             node_str = str(node_id)
         else:
             token_text = tokenizer.decode([node_id])
-            count = data.get('count', 0)
+            count = data.get("count", 0)
             display_text = token_text
             node_str = str(node_id)
 
-        display_text = display_text.replace('\n', '\\n').replace('\t', '\\t')
+        display_text = display_text.replace("\n", "\\n").replace("\t", "\\t")
         if len(display_text) > 20:
             display_text = display_text[:20] + "..."
 
@@ -85,14 +103,14 @@ def visualize_graph(
             label=display_text,
             title=title,
             size=size,
-            color="#00ff41" if isinstance(node_id, int) else "#ff9900"
+            color="#00ff41" if isinstance(node_id, int) else "#ff9900",
         )
 
     logger.info("Adding edges to visualization...")
     edge_count = 0
     for from_node, to_node, data in subgraph.edges(data=True):
-        weight = data.get('weight', 0)
-        count = data.get('count', 0)
+        weight = data.get("weight", 0)
+        count = data.get("count", 0)
 
         if weight < min_edge_weight:
             continue
@@ -107,21 +125,19 @@ def visualize_graph(
         else:
             to_text = tokenizer.decode([to_node])
 
-        order = data.get('order', 1)
+        order = data.get("order", 1)
         title = f"Order-{order}\n'{from_text}' → '{to_text}'\nProb: {weight:.3f}\nCount: {count}"
 
         edge_width = max(0.5, weight * 10)
 
         net.add_edge(
-            str(from_node),
-            str(to_node),
-            title=title,
-            width=edge_width,
-            color="#888888"
+            str(from_node), str(to_node), title=title, width=edge_width, color="#888888"
         )
         edge_count += 1
 
-    logger.info(f"Visualization contains {len(subgraph.nodes())} nodes and {edge_count} edges")
+    logger.info(
+        f"Visualization contains {len(subgraph.nodes())} nodes and {edge_count} edges"
+    )
 
     net.set_options("""
     {
@@ -162,10 +178,14 @@ def main():
 
     parser = argparse.ArgumentParser(description="Visualize knowledge graph")
     parser.add_argument("graph_path", help="Path to the graph .pkl file")
-    parser.add_argument("--tokenizer", default="meta-llama/Llama-3.2-3B", help="Tokenizer name")
+    parser.add_argument(
+        "--tokenizer", default="meta-llama/Llama-3.2-3B", help="Tokenizer name"
+    )
     parser.add_argument("--output", default="graph_viz.html", help="Output HTML file")
     parser.add_argument("--max-nodes", type=int, help="Limit to N most frequent tokens")
-    parser.add_argument("--min-weight", type=float, default=0.0, help="Minimum edge probability")
+    parser.add_argument(
+        "--min-weight", type=float, default=0.0, help="Minimum edge probability"
+    )
     args = parser.parse_args()
 
     hf_token = os.getenv("HF_TOKEN")
@@ -175,7 +195,7 @@ def main():
         args.output,
         hf_token,
         args.max_nodes,
-        args.min_weight
+        args.min_weight,
     )
 
 

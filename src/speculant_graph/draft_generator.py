@@ -11,7 +11,10 @@ from speculant_graph.download_utils import configure_download_mode
 
 class DraftResult(BaseModel):
     token_ids: list[int]
-    token_probs: list[float]  # P_draft(token) for each token
+    token_probs: list[float]
+    matched_contexts: list[tuple]
+    successors: list[list[int]]
+    successor_weights: list[list[float]]
     strategy: str
     requested_k: int
     actual_length: int
@@ -20,7 +23,6 @@ class DraftResult(BaseModel):
 
 
 class DraftGenerator:
-
     def __init__(
         self,
         graph: nx.DiGraph,
@@ -28,7 +30,7 @@ class DraftGenerator:
         max_order: int,
         tokenizer_name: str = "openai/gpt-oss-20b",
         hf_token: str | None = None,
-        download_mode: Literal["auto", "hf_transfer", "default"] = "auto"
+        download_mode: Literal["auto", "hf_transfer", "default"] = "auto",
     ):
         self.graph = graph
         self.context_index = context_index
@@ -44,7 +46,7 @@ class DraftGenerator:
 
         for node, data in self.graph.nodes(data=True):
             if isinstance(node, int):
-                count = data.get('count', 0)
+                count = data.get("count", 0)
                 if count > max_count:
                     max_count = count
                     most_frequent = node
@@ -52,12 +54,7 @@ class DraftGenerator:
         logger.debug(f"Most frequent token: {most_frequent} (count: {max_count})")
         return most_frequent
 
-    def generate(
-        self,
-        prompt: str,
-        k: int,
-        strategy: str = "greedy"
-    ) -> DraftResult:
+    def generate(self, prompt: str, k: int, strategy: str = "greedy") -> DraftResult:
         token_ids = self.tokenizer.encode(prompt)
 
         if len(token_ids) == 0:
@@ -65,21 +62,31 @@ class DraftGenerator:
             return DraftResult(
                 token_ids=[],
                 token_probs=[],
+                matched_contexts=[],
+                successors=[],
+                successor_weights=[],
                 strategy=strategy,
                 requested_k=k,
                 actual_length=0,
                 terminated_early=True,
-                termination_reason="Empty prompt"
+                termination_reason="Empty prompt",
             )
 
-        logger.info(f"Drafting up to {k} tokens using {strategy} strategy from multi-order graph...")
+        logger.info(
+            f"Drafting up to {k} tokens using {strategy} strategy from multi-order graph..."
+        )
 
         draft_tokens = []
         draft_probs = []
+        matched_contexts = []
+        successors_list = []
+        successor_weights_list = []
         current_context = token_ids.copy()
 
         while len(draft_tokens) < k:
-            matched_order, context_tuple = self._find_highest_order_match(current_context)
+            matched_order, context_tuple = self._find_highest_order_match(
+                current_context
+            )
 
             if matched_order == 0:
                 logger.debug("No matching context found in any order, stopping draft")
@@ -88,22 +95,39 @@ class DraftGenerator:
             logger.debug(f"Matched order-{matched_order} context: {context_tuple}")
 
             if strategy == "greedy":
-                next_tokens, next_probs = self._generate_greedy_from_context(context_tuple, k - len(draft_tokens))
+                next_tokens, next_probs, contexts, succs, weights = (
+                    self._generate_greedy_from_context(
+                        context_tuple, k - len(draft_tokens)
+                    )
+                )
             elif strategy == "sampling":
-                next_tokens, next_probs = self._generate_sampling_from_context(context_tuple, k - len(draft_tokens))
+                next_tokens, next_probs, contexts, succs, weights = (
+                    self._generate_sampling_from_context(
+                        context_tuple, k - len(draft_tokens)
+                    )
+                )
             else:
-                raise ValueError(f"Unknown strategy: {strategy}. Use 'greedy' or 'sampling'")
+                raise ValueError(
+                    f"Unknown strategy: {strategy}. Use 'greedy' or 'sampling'"
+                )
 
             if not next_tokens:
-                logger.debug(f"No more tokens from order-{matched_order} context, stopping draft")
+                logger.debug(
+                    f"No more tokens from order-{matched_order} context, stopping draft"
+                )
                 break
 
             draft_tokens.extend(next_tokens)
             draft_probs.extend(next_probs)
+            matched_contexts.extend(contexts)
+            successors_list.extend(succs)
+            successor_weights_list.extend(weights)
             current_context.extend(next_tokens)
 
             context_text = self.tokenizer.decode(next_tokens)
-            logger.debug(f"Generated {len(next_tokens)} tokens from order-{matched_order}: '{context_text}'")
+            logger.debug(
+                f"Generated {len(next_tokens)} tokens from order-{matched_order}: '{context_text}'"
+            )
 
         terminated_early = len(draft_tokens) < k
         termination_reason = None
@@ -116,16 +140,21 @@ class DraftGenerator:
 
         draft_text = self.tokenizer.decode(draft_tokens) if draft_tokens else "(empty)"
         token_ids_str = ", ".join(str(t) for t in draft_tokens)
-        logger.info(f"Draft complete: {len(draft_tokens)}/{k} tokens = '{draft_text}' (IDs: {token_ids_str})")
+        logger.info(
+            f"Draft complete: {len(draft_tokens)}/{k} tokens = '{draft_text}' (IDs: {token_ids_str})"
+        )
 
         return DraftResult(
             token_ids=draft_tokens,
             token_probs=draft_probs,
+            matched_contexts=matched_contexts,
+            successors=successors_list,
+            successor_weights=successor_weights_list,
             strategy=strategy,
             requested_k=k,
             actual_length=len(draft_tokens),
             terminated_early=terminated_early,
-            termination_reason=termination_reason
+            termination_reason=termination_reason,
         )
 
     def _find_highest_order_match(self, context: list[int]) -> tuple[int, tuple | None]:
@@ -140,9 +169,12 @@ class DraftGenerator:
 
         return 0, None
 
-    def _generate_greedy_from_context(self, context: tuple, max_tokens: int) -> tuple[list[int], list[float]]:
+    def _generate_greedy_from_context(self, context: tuple, max_tokens: int):
         draft = []
         probs = []
+        contexts = []
+        successors_list = []
+        weights_list = []
         current_context = context
 
         for _ in range(max_tokens):
@@ -151,14 +183,17 @@ class DraftGenerator:
             if not successors:
                 break
 
+            weights = [self.graph[current_context][s]["weight"] for s in successors]
             best_successor = max(
-                successors,
-                key=lambda t: self.graph[current_context][t]['weight']
+                successors, key=lambda t: self.graph[current_context][t]["weight"]
             )
-            best_prob = self.graph[current_context][best_successor]['weight']
+            best_prob = self.graph[current_context][best_successor]["weight"]
 
             draft.append(best_successor)
             probs.append(best_prob)
+            contexts.append(current_context)
+            successors_list.append(successors)
+            weights_list.append(weights)
 
             order = len(current_context)
             if order < self.max_order:
@@ -169,11 +204,14 @@ class DraftGenerator:
             if current_context not in self.context_index:
                 break
 
-        return draft, probs
+        return draft, probs, contexts, successors_list, weights_list
 
-    def _generate_sampling_from_context(self, context: tuple, max_tokens: int) -> tuple[list[int], list[float]]:
+    def _generate_sampling_from_context(self, context: tuple, max_tokens: int):
         draft = []
         probs = []
+        contexts = []
+        successors_list = []
+        weights_list = []
         current_context = context
 
         for _ in range(max_tokens):
@@ -182,13 +220,16 @@ class DraftGenerator:
             if not successors:
                 break
 
-            weights = [self.graph[current_context][s]['weight'] for s in successors]
+            weights = [self.graph[current_context][s]["weight"] for s in successors]
 
             sampled_successor = random.choices(successors, weights=weights, k=1)[0]
-            sampled_prob = self.graph[current_context][sampled_successor]['weight']
+            sampled_prob = self.graph[current_context][sampled_successor]["weight"]
 
             draft.append(sampled_successor)
             probs.append(sampled_prob)
+            contexts.append(current_context)
+            successors_list.append(successors)
+            weights_list.append(weights)
 
             order = len(current_context)
             if order < self.max_order:
@@ -199,7 +240,7 @@ class DraftGenerator:
             if current_context not in self.context_index:
                 break
 
-        return draft, probs
+        return draft, probs, contexts, successors_list, weights_list
 
     @classmethod
     def from_file(
@@ -207,12 +248,16 @@ class DraftGenerator:
         filepath: str,
         tokenizer_name: str = "openai/gpt-oss-20b",
         hf_token: str | None = None,
-        download_mode: Literal["auto", "hf_transfer", "default"] = "auto"
+        download_mode: Literal["auto", "hf_transfer", "default"] = "auto",
     ) -> Self:
         from speculant_graph.graph_builder import GraphBuilder
 
-        graph, metadata = GraphBuilder.load(filepath)
+        graph, metadata = GraphBuilder.load(
+            filepath, validate_tokenizer=True, expected_tokenizer=tokenizer_name
+        )
         context_index = metadata.get("context_index", {})
         max_order = metadata.get("max_order", 1)
 
-        return cls(graph, context_index, max_order, tokenizer_name, hf_token, download_mode)
+        return cls(
+            graph, context_index, max_order, tokenizer_name, hf_token, download_mode
+        )

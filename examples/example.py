@@ -31,12 +31,12 @@ def main():
             chunk_size=graph_config.chunk_size,
         )
 
-        graph = builder.build_from_files([str(f) for f in corpus_files])
+        builder.build_from_files([str(f) for f in corpus_files])
         builder.save(str(graph_path))
     else:
         logger.info(f"Using existing graph: {graph_path}")
 
-    verifier_config = VerifierConfig(acceptance_threshold=0.6)
+    verifier_config = VerifierConfig()
     draft_config = DraftConfig(k=8, strategy="greedy")
 
     decoder = SpeculativeDecoder(

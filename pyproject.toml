@@ -33,3 +33,15 @@ python_functions = ["test_*"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/speculant_graph"]
+
+[tool.ruff]
+# Ignore docstring and comment length rules
+lint.ignore = [
+    "D",      # pydocstyle (all docstring rules)
+    "E501",   # line-too-long (for comments and code)
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.3.0",
+]

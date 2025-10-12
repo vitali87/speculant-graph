@@ -20,6 +20,27 @@ Traditional speculative decoding uses a small draft model to propose tokens that
 uv pip install -e .
 ```
 
+### Development Setup
+
+This project uses pre-commit hooks to maintain code quality:
+- **uv-lock**: Ensures the lockfile is up-to-date
+- **Ruff**: Linting and code formatting
+- **Conventional Commits**: Validates commit message format
+
+Setup pre-commit hooks:
+
+```bash
+uv add --dev pre-commit
+pre-commit install
+pre-commit install --hook-type commit-msg
+```
+
+Run hooks manually on all files:
+
+```bash
+pre-commit run --all-files
+```
+
 ## Quick Start
 
 ### 1. Build Multi-Order Knowledge Graph
@@ -61,7 +82,7 @@ from speculant_graph import (
 
 decoder = SpeculativeDecoder(
     graph_path="knowledge_graph.pkl",
-    verifier_config=VerifierConfig(acceptance_threshold=0.6),
+    verifier_config=VerifierConfig(model_name="openai/gpt-oss-20b"),
     draft_config=DraftConfig(k=8, strategy="greedy")
 )
 
@@ -107,8 +128,7 @@ builder.save("llama_graph.pkl")
 
 # Use Llama for verification
 verifier_config = VerifierConfig(
-    model_name=MODEL_NAME,
-    acceptance_threshold=0.6
+    model_name=MODEL_NAME
 )
 decoder = SpeculativeDecoder(
     graph_path="llama_graph.pkl",
@@ -150,7 +170,6 @@ All parameters are managed via Pydantic models and support environment variables
 ### VerifierConfig
 - `model_name`: HuggingFace model (default: "openai/gpt-oss-20b") - **Must match graph tokenizer**
 - `device`: "cuda", "cpu", or None for auto-detect
-- `acceptance_threshold`: Probability threshold for accepting drafts (default: 0.5)
 - `hf_token`: HuggingFace API token for gated models (default: None)
 - `download_mode`: Download acceleration - "auto", "hf_transfer", or "default" (default: "auto")
 
@@ -163,7 +182,7 @@ All parameters are managed via Pydantic models and support environment variables
 ```bash
 export SPECULANT_DRAFT__K=10
 export SPECULANT_DRAFT__STRATEGY=sampling
-export SPECULANT_VERIFIER__ACCEPTANCE_THRESHOLD=0.7
+export SPECULANT_VERIFIER__MODEL_NAME=meta-llama/Llama-3.2-3B
 export SPECULANT_VERIFIER__DOWNLOAD_MODE=hf_transfer
 ```
 
@@ -230,7 +249,20 @@ graph_config = GraphConfig(
 
 ### Verification
 
-The verifier model accepts or rejects draft tokens based on its own probability distribution and the configured acceptance threshold. Rejected drafts trigger verifier generation of one token, then drafting resumes.
+The verifier model uses **rejection sampling** to accept or reject draft tokens, guaranteeing that the output distribution matches what the verifier model would generate autoregressively.
+
+**Standard Acceptance Rule (both strategies):**
+- Accept with probability: `α = min(1, P_target(x) / q(x))`
+  - Where `q` is the full draft distribution over successors at the matched context
+  - For greedy: `q` is concentrated on the argmax token
+  - For sampling: `q` is the distribution the token was sampled from
+- On rejection: sample correction from residual `max(0, P_target - q)`
+  - Builds sparse `q` vector from all successors at the matched context
+  - Computes per-token residual: `residual(x) = max(0, p(x) - q(x))`
+  - Renormalizes and samples
+- Fallback: if residual sums to 0, sample from `P_target` conditioned on `y ≠ x`
+
+This method guarantees the output distribution is identical to autoregressive generation from the verifier.
 
 ## Example
 

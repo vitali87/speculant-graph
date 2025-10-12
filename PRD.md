@@ -234,13 +234,23 @@ return draft_tokens
 - **Loading:** Use HuggingFace Transformers library
 - **Tokenizer:** Same as graph construction
 
-#### 3.3.2 Acceptance Sampling
-- **Input:** User prompt + draft tokens
-- **Process:**
-  1. Verifier generates logits for each position
-  2. Compare draft tokens with verifier distribution
-  3. Accept/reject based on acceptance sampling algorithm
-- **Output:** Accepted prefix + new tokens from verifier
+#### 3.3.2 Rejection Sampling
+- **Input:** User prompt + draft tokens + full draft distribution q for each step
+- **Algorithm:** For each draft token (verified in parallel via single forward pass):
+
+  **Standard Acceptance Rule (both greedy and sampling):**
+  1. Accept with probability: `α = min(1, P_target(x) / q(x))`
+     - For greedy drafts: q is concentrated on the single proposed token
+     - For sampling drafts: q is the distribution the draft was sampled from
+  2. If rejected: sample correction from residual distribution `max(0, P_target - q)`
+     - Build sparse q vector from the full successor distribution at matched context
+     - Compute residual per-token: `residual(x) = max(0, p(x) - q(x))`
+     - Renormalize and sample
+  3. Fallback: if residual sums to 0, sample from `P_target` conditioned on `y ≠ x`
+  4. Stop at first rejection
+
+- **Guarantee:** Output distribution is identical to autoregressive generation from verifier
+- **Output:** Accepted tokens + optional correction token
 
 #### 3.3.3 End-to-End Pipeline
 ```
@@ -352,7 +362,6 @@ from speculant_graph import (
 # Configure
 verifier_config = VerifierConfig(
     model_name="meta-llama/Llama-3.2-3B",
-    acceptance_threshold=0.6,
     hf_token="your_token"
 )
 draft_config = DraftConfig(k=8, strategy="greedy")
