@@ -38,24 +38,9 @@ class DraftGenerator:
 
         configure_download_mode(download_mode)
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, token=hf_token)
-        self.most_frequent_token = self._find_most_frequent_token()
-
-    def _find_most_frequent_token(self) -> int:
-        max_count = 0
-        most_frequent = None
-
-        for node, data in self.graph.nodes(data=True):
-            if isinstance(node, int):
-                count = data.get("count", 0)
-                if count > max_count:
-                    max_count = count
-                    most_frequent = node
-
-        logger.debug(f"Most frequent token: {most_frequent} (count: {max_count})")
-        return most_frequent
 
     def generate(self, prompt: str, k: int, strategy: str = "greedy") -> DraftResult:
-        token_ids = self.tokenizer.encode(prompt)
+        token_ids = self.tokenizer.encode(prompt, add_special_tokens=False)
 
         if len(token_ids) == 0:
             logger.warning("Empty prompt, cannot draft")
@@ -187,10 +172,9 @@ class DraftGenerator:
             best_successor = max(
                 successors, key=lambda t: self.graph[current_context][t]["weight"]
             )
-            best_prob = self.graph[current_context][best_successor]["weight"]
 
             draft.append(best_successor)
-            probs.append(best_prob)
+            probs.append(1.0)
             contexts.append(current_context)
             successors_list.append(successors)
             weights_list.append(weights)
@@ -241,6 +225,28 @@ class DraftGenerator:
                 break
 
         return draft, probs, contexts, successors_list, weights_list
+
+    def get_most_frequent_token(self) -> int:
+        """
+        Returns the token with the highest count from the graph.
+        Used as a fallback starter token for empty prompts when no special tokens exist.
+        """
+        max_count = 0
+        most_frequent = 0
+
+        for node in self.graph.nodes():
+            # Only check token nodes (int), not n-gram context nodes (tuple)
+            if isinstance(node, int):
+                node_data = self.graph.nodes[node]
+                count = node_data.get("count", 0)
+                if count > max_count:
+                    max_count = count
+                    most_frequent = node
+
+        logger.debug(
+            f"Most frequent token in graph: {most_frequent} (count: {max_count})"
+        )
+        return most_frequent
 
     @classmethod
     def from_file(

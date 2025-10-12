@@ -176,7 +176,7 @@ def visualize_graph(
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description="Visualize knowledge graph")
+    parser = argparse.ArgumentParser(description="Visualize n-gram graph")
     parser.add_argument("graph_path", help="Path to the graph .pkl file")
     parser.add_argument(
         "--tokenizer", default="meta-llama/Llama-3.2-3B", help="Tokenizer name"

@@ -17,25 +17,27 @@ from speculant_graph import (
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Speculative Graph Decoding Example with Llama-3.2-3B")
+    parser = argparse.ArgumentParser(
+        description="Speculative Graph Decoding Example with Llama-3.2-3B"
+    )
     parser.add_argument(
         "--max-tokens",
         type=int,
         default=50,
-        help="Maximum number of tokens to generate (default: 50)"
+        help="Maximum number of tokens to generate (default: 50)",
     )
     parser.add_argument(
         "--temperature",
         type=float,
         default=0.9,
-        help="Sampling temperature (default: 0.9)"
+        help="Sampling temperature (default: 0.9)",
     )
     parser.add_argument(
         "--prompt",
         type=str,
         nargs="+",
         default=["A termination clause outlines the circumstances under which"],
-        help="Prompt(s) to generate from (default: sample legal prompt)"
+        help="Prompt(s) to generate from (default: sample legal prompt)",
     )
     args = parser.parse_args()
 
@@ -46,11 +48,11 @@ def main():
 
     corpus_dir = Path(__file__).parent / "corpus"
     corpus_files = list(corpus_dir.glob("*.txt"))
-    graph_path = Path(__file__).parent / "llama_knowledge_graph.pkl"
+    graph_path = Path(__file__).parent / "llama_ngram_graph.pkl"
 
     if not graph_path.exists():
         logger.info(
-            f"Building knowledge graph from corpus using {MODEL_NAME} tokenizer..."
+            f"Building n-gram graph from corpus using {MODEL_NAME} tokenizer..."
         )
         graph_config = GraphConfig(tokenizer_name=MODEL_NAME, hf_token=HF_TOKEN)
         builder = GraphBuilder(
@@ -65,9 +67,7 @@ def main():
     else:
         logger.info(f"Using existing graph: {graph_path}")
 
-    verifier_config = VerifierConfig(
-        model_name=MODEL_NAME, hf_token=HF_TOKEN
-    )
+    verifier_config = VerifierConfig(model_name=MODEL_NAME, hf_token=HF_TOKEN)
     draft_config = DraftConfig(k=8, strategy="greedy")
 
     decoder = SpeculativeDecoder(
@@ -82,7 +82,9 @@ def main():
     for prompt in prompts:
         logger.info(f"\nPrompt: {prompt}")
 
-        generation_config = GenerationConfig(max_tokens=args.max_tokens, temperature=args.temperature)
+        generation_config = GenerationConfig(
+            max_tokens=args.max_tokens, temperature=args.temperature
+        )
         result = decoder.generate(prompt, generation_config)
 
         logger.info(f"Generated text: {result.text}")

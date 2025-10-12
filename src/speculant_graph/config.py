@@ -10,7 +10,7 @@ class GraphConfig(BaseModel):
     hf_token: str | None = Field(default=None)
     download_mode: Literal["auto", "hf_transfer", "default"] = Field(
         default="auto",
-        description="Download acceleration mode: 'auto' uses hf_xet if available, 'hf_transfer' for high-bandwidth, 'default' for standard downloads"
+        description="Download acceleration mode: 'auto' uses hf_xet if available, 'hf_transfer' for high-bandwidth, 'default' for standard downloads",
     )
 
 
@@ -25,13 +25,16 @@ class VerifierConfig(BaseModel):
     hf_token: str | None = Field(default=None)
     download_mode: Literal["auto", "hf_transfer", "default"] = Field(
         default="auto",
-        description="Download acceleration mode: 'auto' uses hf_xet if available, 'hf_transfer' for high-bandwidth, 'default' for standard downloads"
+        description="Download acceleration mode: 'auto' uses hf_xet if available, 'hf_transfer' for high-bandwidth, 'default' for standard downloads",
     )
 
 
 class GenerationConfig(BaseModel):
     max_tokens: int = Field(default=100, gt=0)
     temperature: float = Field(default=1.0, gt=0.0)
+    seed: int | None = Field(
+        default=None, description="Random seed for reproducibility"
+    )
 
 
 class SpeculativeDecodingConfig(BaseSettings):

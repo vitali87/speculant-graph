@@ -1,16 +1,16 @@
 # Product Requirements Document (PRD)
-## Speculative Decoding with Knowledge Graph Drafter
+## Speculative Decoding with N-gram Graph Drafter
 
 ---
 
 ## 1. Executive Summary
 
 ### 1.1 Overview
-This project implements a novel approach to speculative decoding where the draft model is replaced by a multi-order knowledge graph built from domain-specific text corpora. Instead of using a small LLM as the drafter, we use Markov Chains of varying orders (1st through 5th order by default) to capture token transition patterns extracted from user-supplied text files.
+This project implements a novel approach to speculative decoding where the draft model is replaced by a multi-order n-gram graph built from domain-specific text corpora. Instead of using a small LLM as the drafter, we use Markov Chains of varying orders (1st through 5th order by default) to capture token transition patterns extracted from user-supplied text files.
 
 ### 1.2 Key Innovation
 - **Traditional speculative decoding:** Small draft model → Large verifier model
-- **Our approach:** Knowledge graph drafter → Large verifier model
+- **Our approach:** N-gram graph drafter → Large verifier model
 
 ### 1.3 Benefits
 - No need to train/maintain a separate draft model
@@ -40,7 +40,7 @@ This project implements a novel approach to speculative decoding where the draft
          │
          ▼
 ┌─────────────────────┐
-│  Knowledge Graph    │
+│  N-gram Graph       │
 │  (NetworkX)         │
 │  - Nodes: n-grams   │
 │  - Edges: P(j|ctx)  │
@@ -235,19 +235,25 @@ return draft_tokens
 - **Tokenizer:** Same as graph construction
 
 #### 3.3.2 Rejection Sampling
-- **Input:** User prompt + draft tokens + full draft distribution q for each step
+- **Input:** User prompt + draft tokens + proposal metadata per step
 - **Algorithm:** For each draft token (verified in parallel via single forward pass):
 
-  **Standard Acceptance Rule (both greedy and sampling):**
-  1. Accept with probability: `α = min(1, P_target(x) / q(x))`
-     - For greedy drafts: q is concentrated on the single proposed token
-     - For sampling drafts: q is the distribution the draft was sampled from
-  2. If rejected: sample correction from residual distribution `max(0, P_target - q)`
-     - Build sparse q vector from the full successor distribution at matched context
+  **For greedy strategy (deterministic proposal):**
+  1. Proposal distribution: `q(x*) = 1` (delta function at argmax token)
+  2. Accept with probability: `α = P_target(x*)`
+  3. If rejected: sample from `P_target` conditioned on `y ≠ x*`
+     - Set `P(x*) = 0`, renormalize, sample
+  4. Stop at first rejection
+
+  **For sampling strategy (stochastic proposal):**
+  1. Proposal distribution: `q` = the graph distribution at matched context
+  2. Accept with probability: `α = min(1, P_target(x) / q(x))`
+  3. If rejected: sample from residual `max(0, P_target - q)`
+     - Build sparse q vector from full successor distribution at matched context
      - Compute residual per-token: `residual(x) = max(0, p(x) - q(x))`
      - Renormalize and sample
-  3. Fallback: if residual sums to 0, sample from `P_target` conditioned on `y ≠ x`
-  4. Stop at first rejection
+  4. Fallback: if residual sums to 0, sample from `P_target` conditioned on `y ≠ x`
+  5. Stop at first rejection
 
 - **Guarantee:** Output distribution is identical to autoregressive generation from verifier
 - **Output:** Accepted tokens + optional correction token
@@ -469,7 +475,7 @@ print(f"Breakdown: {result.num_accepted} accepted, {result.num_rejected} rejecte
 ## 12. Appendix
 
 ### 12.1 Speculative Decoding Background
-Speculative decoding generates draft tokens cheaply (small model) and verifies in parallel with large model. Accepted tokens provide speedup. Our innovation: replace small model with knowledge graph.
+Speculative decoding generates draft tokens cheaply (small model) and verifies in parallel with large model. Accepted tokens provide speedup. Our innovation: replace small model with multi-order n-gram graph.
 
 ### 12.2 Markov Chain Terminology
 - **Order-1 (unigram context):** P(token_n | token_{n-1})

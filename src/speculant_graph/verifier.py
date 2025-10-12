@@ -44,37 +44,81 @@ class SpeculativeDecoder:
         self.model.to(self.device)
         logger.info(f"Model loaded on device: {self.device}")
 
-        logger.info(f"Loading knowledge graph from: {graph_path}")
+        logger.info(f"Loading n-gram graph from: {graph_path}")
         self.draft_generator = DraftGenerator.from_file(
             graph_path,
             verifier_config.model_name,
             verifier_config.hf_token,
             verifier_config.download_mode,
         )
-        logger.info("Knowledge graph loaded successfully")
+        logger.info("N-gram graph loaded successfully")
 
     def generate(
         self, prompt: str, generation_config: GenerationConfig
     ) -> GenerationResult:
+        if generation_config.seed is not None:
+            random.seed(generation_config.seed)
+            torch.manual_seed(generation_config.seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(generation_config.seed)
+            logger.debug(f"Set random seed to {generation_config.seed}")
+
         prompt_preview = prompt if len(prompt) <= 100 else f"{prompt[:100]}..."
         logger.info(f"Generating with prompt: '{prompt_preview}'")
         logger.info(
             f"Config: max_tokens={generation_config.max_tokens}, "
-            f"temperature={generation_config.temperature}"
+            f"temperature={generation_config.temperature}, "
+            f"seed={generation_config.seed}"
         )
 
-        input_ids = self.tokenizer.encode(prompt, return_tensors="pt").to(self.device)
+        enc = self.tokenizer(prompt, add_special_tokens=False, return_tensors="pt")
+        input_ids = enc["input_ids"].to(self.device)
+
+        # Handle empty prompt edge case with robust fallback order
+        if len(input_ids[0]) == 0:
+            starter_token = None
+
+            # Try BOS token first
+            if self.tokenizer.bos_token_id is not None:
+                starter_token = self.tokenizer.bos_token_id
+                logger.debug(
+                    f"Empty prompt detected, injecting BOS token: {starter_token}"
+                )
+            # Try EOS token
+            elif self.tokenizer.eos_token_id is not None:
+                starter_token = self.tokenizer.eos_token_id
+                logger.debug(
+                    f"Empty prompt detected, no BOS, injecting EOS token: {starter_token}"
+                )
+            # Try PAD token
+            elif self.tokenizer.pad_token_id is not None:
+                starter_token = self.tokenizer.pad_token_id
+                logger.debug(
+                    f"Empty prompt detected, no BOS/EOS, injecting PAD token: {starter_token}"
+                )
+            # Fallback: use most frequent token from graph
+            else:
+                starter_token = self.draft_generator.get_most_frequent_token()
+                logger.debug(
+                    f"Empty prompt detected, no special tokens, injecting most frequent graph token: {starter_token}"
+                )
+
+            input_ids = torch.tensor([[starter_token]], device=self.device)
+
         generated_tokens = input_ids[0].tolist()
+        prompt_length = len(input_ids[0])
 
         num_draft_accepted = 0
         num_draft_rejected = 0
         num_verifier_generated = 0
 
-        while len(generated_tokens) - len(input_ids[0]) < generation_config.max_tokens:
-            current_text = self.tokenizer.decode(generated_tokens)
+        while len(generated_tokens) - prompt_length < generation_config.max_tokens:
+            current_text = self.tokenizer.decode(
+                generated_tokens, skip_special_tokens=True
+            )
 
             tokens_remaining = generation_config.max_tokens - (
-                len(generated_tokens) - len(input_ids[0])
+                len(generated_tokens) - prompt_length
             )
             draft_k = min(self.draft_config.k, tokens_remaining)
 
@@ -112,16 +156,22 @@ class SpeculativeDecoder:
             # Log detailed results
             if accepted_count > 0:
                 accepted_draft = draft_result.token_ids[:accepted_count]
-                accepted_text = self.tokenizer.decode(accepted_draft)
+                accepted_text = self.tokenizer.decode(
+                    accepted_draft, skip_special_tokens=True
+                )
                 logger.info(
                     f"✓ Accepted {accepted_count}/{len(draft_result.token_ids)} draft tokens: '{accepted_text}'"
                 )
 
             if has_correction:
                 corrected_token = accepted_tokens[-1]
-                corrected_text = self.tokenizer.decode([corrected_token])
+                corrected_text = self.tokenizer.decode(
+                    [corrected_token], skip_special_tokens=True
+                )
                 rejected_token = draft_result.token_ids[accepted_count]
-                rejected_text = self.tokenizer.decode([rejected_token])
+                rejected_text = self.tokenizer.decode(
+                    [rejected_token], skip_special_tokens=True
+                )
                 logger.info(
                     f"✗ Rejected draft token '{rejected_text}' (ID: {rejected_token})"
                 )
@@ -130,7 +180,9 @@ class SpeculativeDecoder:
                 )
             elif accepted_count == 0:
                 # All tokens rejected, no correction was made yet
-                rejected_text = self.tokenizer.decode(draft_result.token_ids)
+                rejected_text = self.tokenizer.decode(
+                    draft_result.token_ids, skip_special_tokens=True
+                )
                 logger.info(
                     f"✗ Rejected all {len(draft_result.token_ids)} draft tokens: '{rejected_text}'"
                 )
@@ -142,7 +194,9 @@ class SpeculativeDecoder:
                 verifier_count, fallback_tokens = self._generate_from_verifier(
                     generated_tokens, count=1, temperature=generation_config.temperature
                 )
-                fallback_text = self.tokenizer.decode(fallback_tokens)
+                fallback_text = self.tokenizer.decode(
+                    fallback_tokens, skip_special_tokens=True
+                )
                 fallback_ids_str = ", ".join(str(t) for t in fallback_tokens)
                 logger.info(
                     f"→ Verifier sampled fallback token: '{fallback_text}' (ID: {fallback_ids_str})"
@@ -150,7 +204,10 @@ class SpeculativeDecoder:
                 num_verifier_generated += verifier_count
                 generated_tokens.extend(fallback_tokens)
 
-        final_text = self.tokenizer.decode(generated_tokens)
+        # Return only the continuation (exclude prompt)
+        final_text = self.tokenizer.decode(
+            generated_tokens[prompt_length:], skip_special_tokens=True
+        )
         total_draft_proposed = num_draft_accepted + num_draft_rejected
         acceptance_rate = (
             num_draft_accepted / total_draft_proposed
@@ -159,7 +216,7 @@ class SpeculativeDecoder:
         )
 
         logger.info(
-            f"Generation complete: {len(generated_tokens) - len(input_ids[0])} tokens generated"
+            f"Generation complete: {len(generated_tokens) - prompt_length} tokens generated"
         )
         logger.info(
             f"Draft acceptance rate: {acceptance_rate:.2%} ({num_draft_accepted}/{total_draft_proposed})"
@@ -170,11 +227,11 @@ class SpeculativeDecoder:
 
         return GenerationResult(
             text=final_text,
-            token_ids=generated_tokens,
+            token_ids=generated_tokens[prompt_length:],
             acceptance_rate=acceptance_rate,
             num_accepted=num_draft_accepted,
             num_rejected=num_draft_rejected,
-            total_tokens=len(generated_tokens) - len(input_ids[0]),
+            total_tokens=len(generated_tokens) - prompt_length,
         )
 
     def _verify_draft(
@@ -206,29 +263,42 @@ class SpeculativeDecoder:
             target_probs = torch.softmax(logits, dim=-1)
 
             target_prob = target_probs[draft_token].item()
-            draft_prob = draft_probs[i]
 
-            acceptance_prob = min(1.0, target_prob / draft_prob)
+            if strategy == "greedy":
+                acceptance_prob = target_prob
+            else:
+                draft_prob = draft_probs[i]
+                acceptance_prob = min(1.0, target_prob / draft_prob)
 
             if random.random() < acceptance_prob:
                 accepted_tokens.append(draft_token)
                 num_actually_accepted += 1
             else:
-                succ = successors[i]
-                q_weights = successor_weights[i]
-
-                q = torch.zeros_like(target_probs)
-                q[succ] = torch.tensor(q_weights, device=target_probs.device)
-
-                residual = torch.clamp(target_probs - q, min=0.0)
-
-                if residual.sum() == 0:
+                if strategy == "greedy":
                     p_cond = target_probs.clone()
                     p_cond[draft_token] = 0.0
                     residual = p_cond
+                else:
+                    succ = successors[i]
+                    q_weights = successor_weights[i]
 
-                if residual.sum() > 0:
-                    residual = residual / residual.sum()
+                    q = torch.zeros_like(target_probs)
+                    q[succ] = torch.tensor(
+                        q_weights, device=target_probs.device, dtype=target_probs.dtype
+                    )
+
+                    residual = torch.clamp(target_probs - q, min=0.0)
+
+                    residual_sum = residual.sum().item()
+                    if residual_sum == 0.0:
+                        p_cond = target_probs.clone()
+                        p_cond[draft_token] = 0.0
+                        residual = p_cond
+                        residual_sum = residual.sum().item()
+
+                residual_sum = residual.sum().item()
+                if residual_sum > 0.0:
+                    residual = residual / residual_sum
                     corrected_token = torch.multinomial(residual, num_samples=1).item()
                     accepted_tokens.append(corrected_token)
                     has_correction = True

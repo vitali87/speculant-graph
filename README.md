@@ -1,10 +1,10 @@
 # Speculative Graph Decoding
 
-Novel approach to speculative decoding using multi-order knowledge graphs as draft models instead of small LLMs.
+Novel approach to speculative decoding using multi-order n-gram graphs as draft models instead of small LLMs.
 
 ## Overview
 
-Traditional speculative decoding uses a small draft model to propose tokens that a large verifier model accepts or rejects. This project replaces the draft model with a **multi-order knowledge graph** built from domain-specific text corpora.
+Traditional speculative decoding uses a small draft model to propose tokens that a large verifier model accepts or rejects. This project replaces the draft model with a **multi-order n-gram graph** built from domain-specific text corpora.
 
 ### Key Innovation
 
@@ -43,14 +43,14 @@ pre-commit run --all-files
 
 ## Quick Start
 
-### 1. Build Multi-Order Knowledge Graph
+### 1. Build Multi-Order N-gram Graph
 
 ```python
 from speculant_graph import GraphBuilder, GraphConfig
 
 config = GraphConfig(
     max_order=5,  # Build orders 1-5 (default)
-    tokenizer_name="meta-llama/Llama-3.2-3B"
+    tokenizer_name="meta-llama/Llama-3.2-3B"  # Must match verifier model
 )
 
 builder = GraphBuilder(
@@ -60,7 +60,7 @@ builder = GraphBuilder(
 )
 
 graph = builder.build_from_files(["corpus1.txt", "corpus2.txt"])
-builder.save("knowledge_graph.pkl")
+builder.save("ngram_graph.pkl")
 
 # Graph now contains:
 # - Order 1: P(next | token_i)
@@ -81,8 +81,8 @@ from speculant_graph import (
 )
 
 decoder = SpeculativeDecoder(
-    graph_path="knowledge_graph.pkl",
-    verifier_config=VerifierConfig(model_name="openai/gpt-oss-20b"),
+    graph_path="ngram_graph.pkl",
+    verifier_config=VerifierConfig(model_name="meta-llama/Llama-3.2-3B"),  # Same as graph tokenizer
     draft_config=DraftConfig(k=8, strategy="greedy")
 )
 
@@ -97,11 +97,13 @@ print(f"Acceptance rate: {result.acceptance_rate:.2%}")
 
 ## Using Different Models
 
-**The system works with ANY HuggingFace model!** The default is `openai/gpt-oss-20b`, but you can use Llama, Mistral, Qwen, or any other model.
+**The system works with ANY HuggingFace model!** You can use Llama, Mistral, Qwen, GPT-OSS, or any other model.
 
 ### Important: Tokenizer Alignment
 
 ⚠️ **Critical:** The tokenizer used to build the graph MUST match the verifier model's tokenizer. Otherwise, token IDs won't align and drafts will be meaningless.
+
+**Key Rule:** Same tokenizer for both graph building AND verification. If you use `meta-llama/Llama-3.1-8B` to build the graph, you MUST use `meta-llama/Llama-3.1-8B` as the verifier model.
 
 ### Example: Using Llama 3
 
@@ -131,7 +133,7 @@ verifier_config = VerifierConfig(
     model_name=MODEL_NAME
 )
 decoder = SpeculativeDecoder(
-    graph_path="llama_graph.pkl",
+    graph_path="llama_graph.pkl",  # Must match saved filename above
     verifier_config=verifier_config,
     draft_config=DraftConfig(k=8, strategy="greedy")
 )
@@ -176,6 +178,7 @@ All parameters are managed via Pydantic models and support environment variables
 ### GenerationConfig
 - `max_tokens`: Maximum tokens to generate (default: 100)
 - `temperature`: Sampling temperature (default: 1.0)
+- `seed`: Random seed for reproducibility (default: None)
 
 ### Environment Variables
 
@@ -251,16 +254,16 @@ graph_config = GraphConfig(
 
 The verifier model uses **rejection sampling** to accept or reject draft tokens, guaranteeing that the output distribution matches what the verifier model would generate autoregressively.
 
-**Standard Acceptance Rule (both strategies):**
-- Accept with probability: `α = min(1, P_target(x) / q(x))`
-  - Where `q` is the full draft distribution over successors at the matched context
-  - For greedy: `q` is concentrated on the argmax token
-  - For sampling: `q` is the distribution the token was sampled from
-- On rejection: sample correction from residual `max(0, P_target - q)`
-  - Builds sparse `q` vector from all successors at the matched context
-  - Computes per-token residual: `residual(x) = max(0, p(x) - q(x))`
-  - Renormalizes and samples
-- Fallback: if residual sums to 0, sample from `P_target` conditioned on `y ≠ x`
+**Acceptance Rule:**
+- **For greedy strategy** (deterministic proposal):
+  - Proposal is `q(x*) = 1` (delta function at chosen token)
+  - Accept with probability: `α = P_target(x*)`
+  - On rejection: sample from `P_target` conditioned on `y ≠ x*`
+- **For sampling strategy** (stochastic proposal):
+  - Proposal is `q` = the graph distribution at matched context
+  - Accept with probability: `α = min(1, P_target(x) / q(x))`
+  - On rejection: sample from residual `max(0, P_target - q)`
+  - Fallback: if residual sums to 0, sample from `P_target` conditioned on `y ≠ x`
 
 This method guarantees the output distribution is identical to autoregressive generation from the verifier.
 

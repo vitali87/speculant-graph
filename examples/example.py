@@ -20,10 +20,10 @@ def main():
 
     corpus_dir = Path(__file__).parent / "corpus"
     corpus_files = list(corpus_dir.glob("*.txt"))
-    graph_path = Path(__file__).parent / "knowledge_graph.pkl"
+    graph_path = Path(__file__).parent / "ngram_graph.pkl"
 
     if not graph_path.exists():
-        logger.info("Building knowledge graph from corpus...")
+        logger.info("Building n-gram graph from corpus...")
         graph_config = GraphConfig()
         builder = GraphBuilder(
             tokenizer_name=graph_config.tokenizer_name,
