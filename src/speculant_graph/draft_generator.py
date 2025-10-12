@@ -1,14 +1,17 @@
 import random
-from typing import Self
+from typing import Self, Literal
 
 import networkx as nx
 from pydantic import BaseModel
 from transformers import AutoTokenizer
 from loguru import logger
 
+from speculant_graph.download_utils import configure_download_mode
+
 
 class DraftResult(BaseModel):
     token_ids: list[int]
+    token_probs: list[float]  # P_draft(token) for each token
     strategy: str
     requested_k: int
     actual_length: int
@@ -24,11 +27,14 @@ class DraftGenerator:
         context_index: dict[tuple, int],
         max_order: int,
         tokenizer_name: str = "openai/gpt-oss-20b",
-        hf_token: str | None = None
+        hf_token: str | None = None,
+        download_mode: Literal["auto", "hf_transfer", "default"] = "auto"
     ):
         self.graph = graph
         self.context_index = context_index
         self.max_order = max_order
+
+        configure_download_mode(download_mode)
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, token=hf_token)
         self.most_frequent_token = self._find_most_frequent_token()
 
@@ -58,6 +64,7 @@ class DraftGenerator:
             logger.warning("Empty prompt, cannot draft")
             return DraftResult(
                 token_ids=[],
+                token_probs=[],
                 strategy=strategy,
                 requested_k=k,
                 actual_length=0,
@@ -68,21 +75,22 @@ class DraftGenerator:
         logger.info(f"Drafting up to {k} tokens using {strategy} strategy from multi-order graph...")
 
         draft_tokens = []
+        draft_probs = []
         current_context = token_ids.copy()
 
         while len(draft_tokens) < k:
             matched_order, context_tuple = self._find_highest_order_match(current_context)
 
             if matched_order == 0:
-                logger.debug(f"No matching context found in any order, stopping draft")
+                logger.debug("No matching context found in any order, stopping draft")
                 break
 
             logger.debug(f"Matched order-{matched_order} context: {context_tuple}")
 
             if strategy == "greedy":
-                next_tokens = self._generate_greedy_from_context(context_tuple, k - len(draft_tokens))
+                next_tokens, next_probs = self._generate_greedy_from_context(context_tuple, k - len(draft_tokens))
             elif strategy == "sampling":
-                next_tokens = self._generate_sampling_from_context(context_tuple, k - len(draft_tokens))
+                next_tokens, next_probs = self._generate_sampling_from_context(context_tuple, k - len(draft_tokens))
             else:
                 raise ValueError(f"Unknown strategy: {strategy}. Use 'greedy' or 'sampling'")
 
@@ -91,6 +99,7 @@ class DraftGenerator:
                 break
 
             draft_tokens.extend(next_tokens)
+            draft_probs.extend(next_probs)
             current_context.extend(next_tokens)
 
             context_text = self.tokenizer.decode(next_tokens)
@@ -111,6 +120,7 @@ class DraftGenerator:
 
         return DraftResult(
             token_ids=draft_tokens,
+            token_probs=draft_probs,
             strategy=strategy,
             requested_k=k,
             actual_length=len(draft_tokens),
@@ -130,8 +140,9 @@ class DraftGenerator:
 
         return 0, None
 
-    def _generate_greedy_from_context(self, context: tuple, max_tokens: int) -> list[int]:
+    def _generate_greedy_from_context(self, context: tuple, max_tokens: int) -> tuple[list[int], list[float]]:
         draft = []
+        probs = []
         current_context = context
 
         for _ in range(max_tokens):
@@ -144,8 +155,10 @@ class DraftGenerator:
                 successors,
                 key=lambda t: self.graph[current_context][t]['weight']
             )
+            best_prob = self.graph[current_context][best_successor]['weight']
 
             draft.append(best_successor)
+            probs.append(best_prob)
 
             order = len(current_context)
             if order < self.max_order:
@@ -156,10 +169,11 @@ class DraftGenerator:
             if current_context not in self.context_index:
                 break
 
-        return draft
+        return draft, probs
 
-    def _generate_sampling_from_context(self, context: tuple, max_tokens: int) -> list[int]:
+    def _generate_sampling_from_context(self, context: tuple, max_tokens: int) -> tuple[list[int], list[float]]:
         draft = []
+        probs = []
         current_context = context
 
         for _ in range(max_tokens):
@@ -171,8 +185,10 @@ class DraftGenerator:
             weights = [self.graph[current_context][s]['weight'] for s in successors]
 
             sampled_successor = random.choices(successors, weights=weights, k=1)[0]
+            sampled_prob = self.graph[current_context][sampled_successor]['weight']
 
             draft.append(sampled_successor)
+            probs.append(sampled_prob)
 
             order = len(current_context)
             if order < self.max_order:
@@ -183,14 +199,15 @@ class DraftGenerator:
             if current_context not in self.context_index:
                 break
 
-        return draft
+        return draft, probs
 
     @classmethod
     def from_file(
         cls,
         filepath: str,
         tokenizer_name: str = "openai/gpt-oss-20b",
-        hf_token: str | None = None
+        hf_token: str | None = None,
+        download_mode: Literal["auto", "hf_transfer", "default"] = "auto"
     ) -> Self:
         from speculant_graph.graph_builder import GraphBuilder
 
@@ -198,4 +215,4 @@ class DraftGenerator:
         context_index = metadata.get("context_index", {})
         max_order = metadata.get("max_order", 1)
 
-        return cls(graph, context_index, max_order, tokenizer_name, hf_token)
+        return cls(graph, context_index, max_order, tokenizer_name, hf_token, download_mode)

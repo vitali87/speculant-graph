@@ -1,10 +1,12 @@
 import torch
+import random
 from pydantic import BaseModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from loguru import logger
 
 from speculant_graph.draft_generator import DraftGenerator
 from speculant_graph.config import VerifierConfig, GenerationConfig, DraftConfig
+from speculant_graph.download_utils import configure_download_mode
 
 
 class GenerationResult(BaseModel):
@@ -27,6 +29,8 @@ class SpeculativeDecoder:
         self.verifier_config = verifier_config
         self.draft_config = draft_config
 
+        configure_download_mode(verifier_config.download_mode)
+
         logger.info(f"Loading verifier model: {verifier_config.model_name}")
         self.model = AutoModelForCausalLM.from_pretrained(
             verifier_config.model_name,
@@ -45,7 +49,8 @@ class SpeculativeDecoder:
         self.draft_generator = DraftGenerator.from_file(
             graph_path,
             verifier_config.model_name,
-            verifier_config.hf_token
+            verifier_config.hf_token,
+            verifier_config.download_mode
         )
         logger.info("Knowledge graph loaded successfully")
 
@@ -85,25 +90,38 @@ class SpeculativeDecoder:
                 generated_tokens.extend(new_tokens)
                 continue
 
-            accepted_count, rejected_count, accepted_tokens = self._verify_draft(
+            accepted_count, rejected_count, accepted_tokens, has_correction = self._verify_draft(
                 generated_tokens,
                 draft_result.token_ids,
+                draft_result.token_probs,
                 temperature=generation_config.temperature
             )
 
             num_draft_accepted += accepted_count
             num_draft_rejected += rejected_count
 
-            if accepted_tokens:
-                accepted_text = self.tokenizer.decode(accepted_tokens)
-                logger.info(f"Verifier accepted {accepted_count}/{len(draft_result.token_ids)} tokens: '{accepted_text}'")
-            else:
-                logger.info(f"Verifier rejected all {len(draft_result.token_ids)} draft tokens")
+            # Log detailed results
+            if accepted_count > 0:
+                accepted_draft = draft_result.token_ids[:accepted_count]
+                accepted_text = self.tokenizer.decode(accepted_draft)
+                logger.info(f"✓ Accepted {accepted_count}/{len(draft_result.token_ids)} draft tokens: '{accepted_text}'")
+
+            if has_correction:
+                corrected_token = accepted_tokens[-1]
+                corrected_text = self.tokenizer.decode([corrected_token])
+                rejected_token = draft_result.token_ids[accepted_count]
+                rejected_text = self.tokenizer.decode([rejected_token])
+                logger.info(f"✗ Rejected draft token '{rejected_text}' (ID: {rejected_token})")
+                logger.info(f"→ Sampled correction '{corrected_text}' (ID: {corrected_token}) from adjusted distribution")
+            elif accepted_count == 0:
+                # All tokens rejected, no correction was made yet
+                rejected_text = self.tokenizer.decode(draft_result.token_ids)
+                logger.info(f"✗ Rejected all {len(draft_result.token_ids)} draft tokens: '{rejected_text}'")
 
             generated_tokens.extend(accepted_tokens)
 
-            if accepted_count == 0:
-                logger.debug("No tokens accepted, generating from verifier as fallback")
+            if accepted_count == 0 and not has_correction:
+                logger.info("→ Generating fallback token from verifier model...")
                 verifier_count, fallback_tokens = self._generate_from_verifier(
                     generated_tokens,
                     count=1,
@@ -111,7 +129,7 @@ class SpeculativeDecoder:
                 )
                 fallback_text = self.tokenizer.decode(fallback_tokens)
                 fallback_ids_str = ", ".join(str(t) for t in fallback_tokens)
-                logger.info(f"Verifier generated fallback token: '{fallback_text}' (ID: {fallback_ids_str})")
+                logger.info(f"→ Verifier sampled fallback token: '{fallback_text}' (ID: {fallback_ids_str})")
                 num_verifier_generated += verifier_count
                 generated_tokens.extend(fallback_tokens)
 
@@ -136,36 +154,54 @@ class SpeculativeDecoder:
         self,
         context_tokens: list[int],
         draft_tokens: list[int],
+        draft_probs: list[float],
         temperature: float
-    ) -> tuple[int, int, list[int]]:
-        input_ids = torch.tensor([context_tokens], device=self.device)
+    ) -> tuple[int, int, list[int], bool]:
+        # Build full sequence: context + all draft tokens
+        full_sequence = context_tokens + draft_tokens
+        input_ids = torch.tensor([full_sequence], device=self.device)
 
+        # ONE forward pass to get logits at all positions
         with torch.no_grad():
             outputs = self.model(input_ids)
-            logits = outputs.logits[0, -1, :] / temperature
-            probs = torch.softmax(logits, dim=-1)
+            all_logits = outputs.logits[0, :, :]  # [seq_len, vocab_size]
 
         accepted_tokens = []
+        num_actually_accepted = 0  # Only count tokens that were truly accepted
+        has_correction = False  # Track if we made a correction
+        context_len = len(context_tokens)
 
-        for draft_token in draft_tokens:
-            draft_prob = probs[draft_token].item()
+        # Verify each draft token using rejection sampling
+        for i, (draft_token, draft_prob) in enumerate(zip(draft_tokens, draft_probs)):
+            # The logit position that predicts draft_token is at context_len + i - 1
+            position = context_len + i - 1
+            logits = all_logits[position, :] / temperature
+            target_probs = torch.softmax(logits, dim=-1)
 
-            if draft_prob > self.verifier_config.acceptance_threshold:
+            target_prob = target_probs[draft_token].item()
+
+            # Rejection sampling criterion: accept with probability min(1, p_target / p_draft)
+            acceptance_prob = min(1.0, target_prob / draft_prob)
+
+            if random.random() < acceptance_prob:
                 accepted_tokens.append(draft_token)
-
-                if len(accepted_tokens) < len(draft_tokens):
-                    context_tokens.append(draft_token)
-                    input_ids = torch.tensor([context_tokens], device=self.device)
-
-                    with torch.no_grad():
-                        outputs = self.model(input_ids)
-                        logits = outputs.logits[0, -1, :] / temperature
-                        probs = torch.softmax(logits, dim=-1)
+                num_actually_accepted += 1
             else:
-                break
+                # Rejection: sample from adjusted distribution (p_target - p_draft)
+                # This ensures the final distribution matches the target model
+                adjusted_probs = torch.clamp(target_probs - draft_prob * torch.zeros_like(target_probs).scatter_(0, torch.tensor(draft_token, device=self.device), 1.0), min=0.0)
 
-        rejected_count = len(draft_tokens) - len(accepted_tokens)
-        return len(accepted_tokens), rejected_count, accepted_tokens
+                # Renormalize if there's probability mass left
+                if adjusted_probs.sum() > 0:
+                    adjusted_probs = adjusted_probs / adjusted_probs.sum()
+                    corrected_token = torch.multinomial(adjusted_probs, num_samples=1).item()
+                    accepted_tokens.append(corrected_token)
+                    has_correction = True
+
+                break  # Stop at first rejection
+
+        rejected_count = len(draft_tokens) - num_actually_accepted
+        return num_actually_accepted, rejected_count, accepted_tokens, has_correction
 
     def _generate_from_verifier(
         self,

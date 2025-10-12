@@ -1,10 +1,13 @@
 import pickle
 from pathlib import Path
 from datetime import datetime
+from typing import Literal
 
 import networkx as nx
 from transformers import AutoTokenizer
 from loguru import logger
+
+from speculant_graph.download_utils import configure_download_mode
 
 
 class GraphBuilder:
@@ -15,9 +18,12 @@ class GraphBuilder:
         max_order: int = 5,
         chunk_size: int = 10000,
         hf_token: str | None = None,
+        download_mode: Literal["auto", "hf_transfer", "default"] = "auto"
     ):
         self.tokenizer_name = tokenizer_name
         self.max_order = max_order
+
+        configure_download_mode(download_mode)
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, token=hf_token)
         self.chunk_size = chunk_size
         self.graph = nx.DiGraph()

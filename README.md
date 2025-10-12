@@ -141,6 +141,7 @@ All parameters are managed via Pydantic models and support environment variables
 - `tokenizer_name`: HuggingFace tokenizer (default: "openai/gpt-oss-20b") - **Must match verifier model**
 - `chunk_size`: File processing chunk size (default: 10000)
 - `hf_token`: HuggingFace API token for gated models (default: None)
+- `download_mode`: Download acceleration - "auto", "hf_transfer", or "default" (default: "auto")
 
 ### DraftConfig
 - `k`: Number of tokens to draft (default: 5)
@@ -151,6 +152,7 @@ All parameters are managed via Pydantic models and support environment variables
 - `device`: "cuda", "cpu", or None for auto-detect
 - `acceptance_threshold`: Probability threshold for accepting drafts (default: 0.5)
 - `hf_token`: HuggingFace API token for gated models (default: None)
+- `download_mode`: Download acceleration - "auto", "hf_transfer", or "default" (default: "auto")
 
 ### GenerationConfig
 - `max_tokens`: Maximum tokens to generate (default: 100)
@@ -162,6 +164,41 @@ All parameters are managed via Pydantic models and support environment variables
 export SPECULANT_DRAFT__K=10
 export SPECULANT_DRAFT__STRATEGY=sampling
 export SPECULANT_VERIFIER__ACCEPTANCE_THRESHOLD=0.7
+export SPECULANT_VERIFIER__DOWNLOAD_MODE=hf_transfer
+```
+
+## Download Acceleration
+
+Control HuggingFace model download speeds with the `download_mode` configuration:
+
+- **`auto`** (default): Uses `hf_xet` if available (included in `huggingface_hub>=0.32.0`)
+- **`hf_transfer`**: High-bandwidth optimization for cloud servers/data centers (1+ Gbps)
+- **`default`**: Standard downloads without acceleration
+
+### Installation
+
+```bash
+# For auto mode (default, recommended)
+pip install -U "huggingface_hub"
+
+# For hf_transfer mode (high-bandwidth only)
+pip install "huggingface_hub[hf_transfer]"
+```
+
+### Usage
+
+```python
+# For high-bandwidth connections (cloud servers, data centers)
+verifier_config = VerifierConfig(
+    model_name="openai/gpt-oss-20b",
+    download_mode="hf_transfer"
+)
+
+# For standard connections (default)
+graph_config = GraphConfig(
+    tokenizer_name="openai/gpt-oss-20b",
+    download_mode="auto"
+)
 ```
 
 ## Architecture

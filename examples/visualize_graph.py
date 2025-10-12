@@ -1,5 +1,4 @@
 import os
-from pathlib import Path
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -21,7 +20,7 @@ def visualize_graph(
     logger.info(f"Loading graph from: {graph_path}")
     graph, metadata = GraphBuilder.load(graph_path)
 
-    logger.info(f"Graph metadata:")
+    logger.info("Graph metadata:")
     logger.info(f"  Tokenizer: {metadata['tokenizer_name']}")
     logger.info(f"  Nodes: {metadata['num_nodes']}")
     logger.info(f"  Edges: {metadata['num_edges']}")

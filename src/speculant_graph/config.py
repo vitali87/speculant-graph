@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
+from typing import Literal
 
 
 class GraphConfig(BaseModel):
@@ -7,6 +8,10 @@ class GraphConfig(BaseModel):
     tokenizer_name: str = Field(default="openai/gpt-oss-20b")
     chunk_size: int = Field(default=10000, gt=0)
     hf_token: str | None = Field(default=None)
+    download_mode: Literal["auto", "hf_transfer", "default"] = Field(
+        default="auto",
+        description="Download acceleration mode: 'auto' uses hf_xet if available, 'hf_transfer' for high-bandwidth, 'default' for standard downloads"
+    )
 
 
 class DraftConfig(BaseModel):
@@ -17,8 +22,11 @@ class DraftConfig(BaseModel):
 class VerifierConfig(BaseModel):
     model_name: str = Field(default="openai/gpt-oss-20b")
     device: str | None = Field(default=None)
-    acceptance_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     hf_token: str | None = Field(default=None)
+    download_mode: Literal["auto", "hf_transfer", "default"] = Field(
+        default="auto",
+        description="Download acceleration mode: 'auto' uses hf_xet if available, 'hf_transfer' for high-bandwidth, 'default' for standard downloads"
+    )
 
 
 class GenerationConfig(BaseModel):

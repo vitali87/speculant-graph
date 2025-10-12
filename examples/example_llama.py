@@ -1,4 +1,5 @@
 import os
+import argparse
 from pathlib import Path
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -16,6 +17,28 @@ from speculant_graph import (
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Speculative Graph Decoding Example with Llama-3.2-3B")
+    parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=50,
+        help="Maximum number of tokens to generate (default: 50)"
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.9,
+        help="Sampling temperature (default: 0.9)"
+    )
+    parser.add_argument(
+        "--prompt",
+        type=str,
+        nargs="+",
+        default=["A termination clause outlines the circumstances under which"],
+        help="Prompt(s) to generate from (default: sample legal prompt)"
+    )
+    args = parser.parse_args()
+
     logger.info("Starting Speculative Graph Decoding Example with Llama-3.2-3B")
 
     MODEL_NAME = "meta-llama/Llama-3.2-3B"
@@ -37,13 +60,13 @@ def main():
             hf_token=graph_config.hf_token,
         )
 
-        graph = builder.build_from_files([str(f) for f in corpus_files])
+        builder.build_from_files([str(f) for f in corpus_files])
         builder.save(str(graph_path))
     else:
         logger.info(f"Using existing graph: {graph_path}")
 
     verifier_config = VerifierConfig(
-        model_name=MODEL_NAME, acceptance_threshold=0.5, hf_token=HF_TOKEN
+        model_name=MODEL_NAME, hf_token=HF_TOKEN
     )
     draft_config = DraftConfig(k=8, strategy="greedy")
 
@@ -53,17 +76,13 @@ def main():
         draft_config=draft_config,
     )
 
-    prompts = [
-        "A termination clause outlines the circumstances under which"
-        # "What is a force majeure clause?",
-        # "Explain indemnification clauses.",
-        # "What are liquidated damages?",
-    ]
+    # Join all prompt arguments into a single string
+    prompts = [" ".join(args.prompt)]
 
     for prompt in prompts:
         logger.info(f"\nPrompt: {prompt}")
 
-        generation_config = GenerationConfig(max_tokens=3, temperature=0.9)
+        generation_config = GenerationConfig(max_tokens=args.max_tokens, temperature=args.temperature)
         result = decoder.generate(prompt, generation_config)
 
         logger.info(f"Generated text: {result.text}")
