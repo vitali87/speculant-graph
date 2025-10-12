@@ -6,7 +6,7 @@
 ## 1. Executive Summary
 
 ### 1.1 Overview
-This project implements a novel approach to speculative decoding where the draft model is replaced by a knowledge graph built from domain-specific text corpora. Instead of using a small LLM as the drafter, we use a first-order Markov Chain representation of token transitions extracted from user-supplied text files.
+This project implements a novel approach to speculative decoding where the draft model is replaced by a multi-order knowledge graph built from domain-specific text corpora. Instead of using a small LLM as the drafter, we use Markov Chains of varying orders (1st through 5th order by default) to capture token transition patterns extracted from user-supplied text files.
 
 ### 1.2 Key Innovation
 - **Traditional speculative decoding:** Small draft model → Large verifier model
@@ -42,15 +42,16 @@ This project implements a novel approach to speculative decoding where the draft
 ┌─────────────────────┐
 │  Knowledge Graph    │
 │  (NetworkX)         │
-│  - Nodes: Tokens    │
-│  - Edges: P(j|i)    │
+│  - Nodes: n-grams   │
+│  - Edges: P(j|ctx)  │
+│  - Orders: 1-5      │
 └────────┬────────────┘
          │
          ▼
 ┌─────────────────────┐
 │   Draft Generator   │
-│   - Greedy top-k    │
-│   - Sampling        │
+│   - Multi-order     │
+│   - Greedy/Sampling │
 └────────┬────────────┘
          │
          ▼
@@ -67,10 +68,12 @@ This project implements a novel approach to speculative decoding where the draft
 ```
 
 ### 2.2 Technology Stack
-- **Language:** Python 3.14
-- **Graph Library:** NetworkX
-- **Tokenizer:** HuggingFace Transformers (`openai/gpt-oss-20b`)
-- **Model:** `openai/gpt-oss-20b` (verifier)
+- **Language:** Python 3.13
+- **Graph Library:** NetworkX 3.5
+- **Tokenizer:** HuggingFace Transformers 4.57.0
+- **ML Framework:** PyTorch 2.8.0
+- **Data Validation:** Pydantic 2.12.0
+- **Logging:** Loguru 0.7.3
 - **Package Manager:** uv
 
 ---
@@ -91,30 +94,42 @@ This project implements a novel approach to speculative decoding where the draft
 
 #### 3.1.3 Graph Structure
 - **Type:** Directed, weighted graph (NetworkX DiGraph)
-- **Nodes:** Individual tokens (token IDs from tokenizer)
+- **Nodes:** Two types:
+  - **Token nodes (int):** Individual tokens with count attribute
+  - **N-gram nodes (tuple):** Contexts of length 1-5 (e.g., `(token_i, token_j)`)
 - **Node attributes:**
-  - `token_id`: Integer token ID
-  - `text`: Human-readable token text (for debugging)
-  - `count`: Total occurrences in corpus
-- **Edges:** Transitions from token_i to token_j
+  - For token nodes: `token_id`, `text`, `count`
+  - For n-gram nodes: No attributes (exist only as edge sources)
+- **Edges:** Transitions from n-gram context to next token
 - **Edge attributes:**
-  - `weight`: Transition probability P(j|i)
+  - `weight`: Transition probability P(next | context)
   - `count`: Frequency count of transition
+  - `order`: Length of the source context (1-5)
 
 #### 3.1.4 Probability Calculation
-- **Method:** Simple frequency counts
+- **Method:** Simple frequency counts for each order
   ```
-  P(token_j | token_i) = count(i → j) / count(i)
+  For order-n:
+  P(token_next | context_n) = count(context_n → next) / Σ count(context_n → *)
+
+  Example order-3:
+  P(token_k | token_i, token_j) = count((i,j) → k) / Σ count((i,j) → *)
   ```
 - **No smoothing:** Unseen transitions have probability 0
 - **No pruning:** Keep ALL observed transitions, regardless of frequency
 
-#### 3.1.5 Markov Order
-- **Initial implementation:** First-order (single token nodes)
-- **Architecture requirement:** Extensible to n-grams (bigrams, trigrams) in future
+#### 3.1.5 Multi-Order Markov Chains
+- **Default max_order:** 5 (configurable 1-10)
+- **Orders built:** All orders from 1 to max_order simultaneously
+  - Order 1: P(next | token_i)
+  - Order 2: P(next | token_i-1, token_i)
+  - Order 3: P(next | token_i-2, token_i-1, token_i)
+  - Order 4: P(next | token_i-3, token_i-2, token_i-1, token_i)
+  - Order 5: P(next | token_i-4, token_i-3, token_i-2, token_i-1, token_i)
+- **Context Index:** Fast O(1) lookup dictionary mapping n-grams to their order
 
 #### 3.1.6 Multi-File Handling
-- **Cross-boundary transitions:** Track transitions across file boundaries
+- **Cross-boundary transitions:** Track transitions across file boundaries for all orders
 - **Rationale:** User provides multiple files as single corpus, intent is unified graph
 
 #### 3.1.7 Memory Optimization
@@ -122,8 +137,12 @@ This project implements a novel approach to speculative decoding where the draft
 - **Sparse representation:** Only store observed transitions (NetworkX default)
 
 #### 3.1.8 Serialization
-- **Save format:** Pickle or GraphML
-- **Include metadata:** Tokenizer config, corpus stats, build timestamp
+- **Save format:** Pickle (includes graph + context_index + metadata)
+- **Include metadata:**
+  - Tokenizer config
+  - max_order
+  - Corpus stats (nodes/edges per order)
+  - Build timestamp
 - **Load validation:** Verify tokenizer compatibility on load
 
 ---
@@ -135,42 +154,71 @@ This project implements a novel approach to speculative decoding where the draft
 - **Draft length k:** Number of sequential tokens to generate
 - **Strategy:** Greedy top-k OR sampling
 
-#### 3.2.2 Starting Point
-- **Primary:** Last token of user prompt
-- **Fallback:** If last token not in graph, use most frequent token in graph
+#### 3.2.2 Multi-Order Context Matching
+- **Algorithm:** For each token to draft:
+  1. Extract last N tokens from current context (N = max_order down to 1)
+  2. Check order-5 context index → if found, use order-5 graph
+  3. If not found, check order-4 → use order-4 graph
+  4. Continue decreasing order until match found
+  5. If no match at any order → return empty draft (verifier generates)
 
 #### 3.2.3 Draft Strategies
 
-**Strategy 1: Greedy Top-K**
-- At each step, select highest probability successor
-- Deterministic output
-- Generate k sequential tokens
+**Strategy 1: Greedy**
+- Select highest probability successor from matched order
+- Continue drafting from same order until dead-end
+- When dead-end hit, send drafted tokens to verifier
+- On next iteration, re-match highest order with new context
 
-**Strategy 2: Probability-Based Sampling**
-- At each step, sample from successor probability distribution
-- Stochastic output
-- Generate k sequential tokens
+**Strategy 2: Sampling**
+- Sample from probability distribution of matched order
+- Continue drafting from same order until dead-end
+- When dead-end hit, send drafted tokens to verifier
+- On next iteration, re-match highest order with new context
 
-#### 3.2.4 Traversal Logic
+#### 3.2.4 Multi-Order Traversal Logic
 ```
-1. Start from last token of prompt (or fallback)
-2. For i = 1 to k:
-   a. Get all successor nodes and their probabilities
-   b. Select next token (greedy or sampling)
-   c. Append to draft sequence
-   d. If no successors OR hit EOS: break (return partial draft)
-3. Return draft sequence (may be < k tokens)
+draft_tokens = []
+current_context = prompt_tokens
+
+while len(draft_tokens) < k:
+    # Find highest matching order
+    for order in [5, 4, 3, 2, 1]:
+        context_ngram = tuple(current_context[-order:])
+        if context_ngram in context_index:
+            # Draft from this order until dead-end
+            while len(draft_tokens) < k:
+                successors = graph.successors(context_ngram)
+                if no successors:
+                    break
+
+                next_token = select(successors, strategy)  # greedy or sampling
+                draft_tokens.append(next_token)
+
+                # Update context (sliding window)
+                current_context.append(next_token)
+                context_ngram = tuple(current_context[-order:])
+
+                if context_ngram not in context_index:
+                    break  # Drop to lower order
+
+            break  # Exit order search loop
+
+    if no order matched:
+        break  # Return partial draft
+
+return draft_tokens
 ```
 
 #### 3.2.5 Edge Cases
 
 | Case | Behavior |
 |------|----------|
-| Unknown starting token | Use most frequent token in graph |
+| No context matches any order | Return empty draft, verifier generates 1 token |
 | Dead end (no successors) | Return partial draft (< k tokens) |
-| Hit EOS token | Stop early, return partial draft |
+| Context found in order-N | Draft from order-N, may drop to order-(N-1) mid-draft |
+| Prompt shorter than max_order | Start matching from lower orders |
 | k > available path | Return what's possible |
-| Very low probability path | Trust the sampling |
 
 #### 3.2.6 Output Format
 - **Type:** List of token IDs
@@ -208,19 +256,19 @@ This project implements a novel approach to speculative decoding where the draft
 
 ### 4.1 Must Have (Phase 1)
 - ✅ Parse .txt files and build graph
-- ✅ First-order Markov chain (single token nodes)
+- ✅ Multi-order Markov chains (orders 1-5)
 - ✅ Support both greedy and sampling draft strategies
-- ✅ Generate k sequential draft tokens
-- ✅ Integrate with `openai/gpt-oss-20b` verifier
+- ✅ Generate k sequential draft tokens with adaptive order selection
+- ✅ Integrate with HuggingFace verifier models
 - ✅ Handle special tokens (BOS, EOS)
-- ✅ Save/load graph from disk
+- ✅ Save/load graph from disk with context index
 - ✅ End-to-end runnable system
+- ✅ Graph visualization tools
 
 ### 4.2 Should Have (Phase 2)
-- ⏳ Support for n-gram contexts (bigrams, trigrams)
 - ⏳ Additional file formats (.json, .md, .pdf)
-- ⏳ Graph visualization tools
 - ⏳ Performance benchmarking vs baseline
+- ⏳ Configurable max_order beyond 5
 
 ### 4.3 Could Have (Future)
 - ⏳ Incremental graph updates (add new docs without rebuild)
@@ -257,17 +305,24 @@ This project implements a novel approach to speculative decoding where the draft
 
 ### 6.1 Graph Builder API
 ```python
-from speculant_graph import GraphBuilder
+from speculant_graph import GraphBuilder, GraphConfig
 
-# Build graph from corpus
-builder = GraphBuilder(
-    tokenizer_name="openai/gpt-oss-20b",
-    corpus_files=["corpus1.txt", "corpus2.txt"]
+# Build multi-order graph from corpus
+graph_config = GraphConfig(
+    max_order=5,
+    tokenizer_name="meta-llama/Llama-3.2-3B",
+    hf_token="your_token"
 )
-graph = builder.build()
 
-# Save graph
-graph.save("knowledge_graph.pkl")
+builder = GraphBuilder(
+    tokenizer_name=graph_config.tokenizer_name,
+    max_order=graph_config.max_order,
+    chunk_size=graph_config.chunk_size,
+    hf_token=graph_config.hf_token
+)
+
+graph = builder.build_from_files(["corpus1.txt", "corpus2.txt"])
+builder.save("knowledge_graph.pkl")
 ```
 
 ### 6.2 Draft Generator API
@@ -287,24 +342,38 @@ draft = generator.generate(
 
 ### 6.3 End-to-End Inference API
 ```python
-from speculant_graph import SpeculativeDecoder
+from speculant_graph import (
+    SpeculativeDecoder,
+    VerifierConfig,
+    DraftConfig,
+    GenerationConfig
+)
 
-# Initialize
+# Configure
+verifier_config = VerifierConfig(
+    model_name="meta-llama/Llama-3.2-3B",
+    acceptance_threshold=0.6,
+    hf_token="your_token"
+)
+draft_config = DraftConfig(k=8, strategy="greedy")
+
+# Initialize decoder
 decoder = SpeculativeDecoder(
     graph_path="knowledge_graph.pkl",
-    model_name="openai/gpt-oss-20b"
+    verifier_config=verifier_config,
+    draft_config=draft_config
 )
 
-# Generate with speculative decoding
-output = decoder.generate(
-    prompt="What is a force majeure clause?",
-    draft_k=10,
-    max_tokens=100,
-    strategy="greedy"
+# Generate with multi-order speculative decoding
+generation_config = GenerationConfig(max_tokens=50, temperature=0.9)
+result = decoder.generate(
+    prompt="A termination clause outlines the circumstances under which",
+    generation_config=generation_config
 )
 
-print(output.text)
-print(f"Acceptance rate: {output.acceptance_rate}")
+print(result.text)
+print(f"Acceptance rate: {result.acceptance_rate:.2%}")
+print(f"Breakdown: {result.num_accepted} accepted, {result.num_rejected} rejected")
 ```
 
 ---
@@ -394,9 +463,11 @@ print(f"Acceptance rate: {output.acceptance_rate}")
 Speculative decoding generates draft tokens cheaply (small model) and verifies in parallel with large model. Accepted tokens provide speedup. Our innovation: replace small model with knowledge graph.
 
 ### 12.2 Markov Chain Terminology
-- **First-order:** P(token_n | token_{n-1})
-- **Zero-order:** P(token_n) - no context
-- **N-gram:** P(token_n | token_{n-N+1}, ..., token_{n-1})
+- **Order-1 (unigram context):** P(token_n | token_{n-1})
+- **Order-2 (bigram context):** P(token_n | token_{n-2}, token_{n-1})
+- **Order-3 (trigram context):** P(token_n | token_{n-3}, token_{n-2}, token_{n-1})
+- **Order-N (n-gram context):** P(token_n | token_{n-N}, ..., token_{n-1})
+- **Adaptive order selection:** Choose highest available order for each prediction
 
 ### 12.3 References
 - Speculative Decoding: [Original Paper]
@@ -405,6 +476,11 @@ Speculative decoding generates draft tokens cheaply (small model) and verifies i
 
 ---
 
-**Document Version:** 1.0
-**Last Updated:** 2025-10-11
+**Document Version:** 2.0
+**Last Updated:** 2025-10-12
 **Author:** Product Specification for Speculative Graph Decoding System
+**Major Changes in v2.0:**
+- Implemented multi-order Markov chains (orders 1-5)
+- Added adaptive order selection algorithm
+- Context index for O(1) n-gram lookups
+- Updated all code examples to reflect new architecture

@@ -1,17 +1,18 @@
 # Speculative Graph Decoding
 
-Novel approach to speculative decoding using knowledge graphs as draft models instead of small LLMs.
+Novel approach to speculative decoding using multi-order knowledge graphs as draft models instead of small LLMs.
 
 ## Overview
 
-Traditional speculative decoding uses a small draft model to propose tokens that a large verifier model accepts or rejects. This project replaces the draft model with a **knowledge graph** built from domain-specific text corpora.
+Traditional speculative decoding uses a small draft model to propose tokens that a large verifier model accepts or rejects. This project replaces the draft model with a **multi-order knowledge graph** built from domain-specific text corpora.
 
 ### Key Innovation
 
-- **Graph-based drafting**: First-order Markov Chain represents token transitions from corpus
+- **Multi-order Markov Chains**: Adaptively uses 1st through 5th order context for accurate predictions
+- **Adaptive order selection**: Automatically selects highest available order for each prediction
 - **Zero training**: No need to train or maintain a separate draft model
 - **Domain-specific**: Graph captures patterns from user-supplied corpora (law, finance, healthcare, etc.)
-- **Transparent**: All transitions are traceable to source text
+- **Transparent**: All transitions are traceable to source text with O(1) context lookup
 
 ## Installation
 
@@ -21,19 +22,31 @@ uv pip install -e .
 
 ## Quick Start
 
-### 1. Build Knowledge Graph
+### 1. Build Multi-Order Knowledge Graph
 
 ```python
 from speculant_graph import GraphBuilder, GraphConfig
 
-config = GraphConfig()
+config = GraphConfig(
+    max_order=5,  # Build orders 1-5 (default)
+    tokenizer_name="meta-llama/Llama-3.2-3B"
+)
+
 builder = GraphBuilder(
     tokenizer_name=config.tokenizer_name,
+    max_order=config.max_order,
     chunk_size=config.chunk_size
 )
 
 graph = builder.build_from_files(["corpus1.txt", "corpus2.txt"])
 builder.save("knowledge_graph.pkl")
+
+# Graph now contains:
+# - Order 1: P(next | token_i)
+# - Order 2: P(next | token_i-1, token_i)
+# - Order 3: P(next | token_i-2, token_i-1, token_i)
+# - Order 4: P(next | token_i-3, token_i-2, token_i-1, token_i)
+# - Order 5: P(next | token_i-4, ..., token_i-1, token_i)
 ```
 
 ### 2. Generate with Speculative Decoding
@@ -124,8 +137,10 @@ verifier_config = VerifierConfig(model_name=MODEL_NAME)
 All parameters are managed via Pydantic models and support environment variables:
 
 ### GraphConfig
+- `max_order`: Maximum Markov chain order (default: 5, range: 1-10)
 - `tokenizer_name`: HuggingFace tokenizer (default: "openai/gpt-oss-20b") - **Must match verifier model**
 - `chunk_size`: File processing chunk size (default: 10000)
+- `hf_token`: HuggingFace API token for gated models (default: None)
 
 ### DraftConfig
 - `k`: Number of tokens to draft (default: 5)
@@ -135,6 +150,7 @@ All parameters are managed via Pydantic models and support environment variables
 - `model_name`: HuggingFace model (default: "openai/gpt-oss-20b") - **Must match graph tokenizer**
 - `device`: "cuda", "cpu", or None for auto-detect
 - `acceptance_threshold`: Probability threshold for accepting drafts (default: 0.5)
+- `hf_token`: HuggingFace API token for gated models (default: None)
 
 ### GenerationConfig
 - `max_tokens`: Maximum tokens to generate (default: 100)
@@ -150,21 +166,34 @@ export SPECULANT_VERIFIER__ACCEPTANCE_THRESHOLD=0.7
 
 ## Architecture
 
-### Graph Structure
+### Multi-Order Graph Structure
 
-- **Nodes**: Token IDs with metadata (text, count)
-- **Edges**: Transitions with probabilities P(j|i) = count(i→j) / count(i)
-- **Storage**: NetworkX DiGraph serialized with pickle
+- **Nodes**: Two types:
+  - Token nodes (int): Individual tokens with metadata (text, count)
+  - N-gram nodes (tuple): Context sequences of length 1-5
+- **Edges**: Transitions from n-gram contexts to next tokens
+  - Edge attributes: `weight` (probability), `count` (frequency), `order` (context length)
+- **Context Index**: O(1) lookup dictionary mapping n-grams to their order
+- **Storage**: NetworkX DiGraph + context index serialized with pickle
 
-### Draft Generation
+### Adaptive Draft Generation
 
-Two strategies:
-1. **Greedy**: Select highest probability successor at each step
-2. **Sampling**: Sample from transition probability distribution
+**Order Selection Algorithm:**
+1. For each token to draft, extract last N tokens from context (N = max_order down to 1)
+2. Check order-5 index → if found, draft from order-5 graph
+3. If not found, check order-4, then order-3, etc.
+4. Draft from highest matching order until dead-end or k tokens reached
+5. When dead-end: return to step 1 with updated context
+
+**Two Strategies:**
+1. **Greedy**: Select highest probability successor from matched order
+2. **Sampling**: Sample from probability distribution of matched order
+
+**Key Advantage:** Higher-order contexts provide more accurate predictions when available, gracefully falling back to lower orders when needed.
 
 ### Verification
 
-The verifier model (gpt-oss-20b) accepts or rejects draft tokens based on its own probability distribution and the configured acceptance threshold.
+The verifier model accepts or rejects draft tokens based on its own probability distribution and the configured acceptance threshold. Rejected drafts trigger verifier generation of one token, then drafting resumes.
 
 ## Example
 
@@ -179,23 +208,42 @@ This builds a graph from legal contract text and generates responses to legal qu
 
 ## Design Decisions
 
-### Why First-Order Markov Chains?
+### Why Multi-Order Markov Chains?
 
-Starting simple with single-token conditioning. Architecture supports future n-gram extensions (bigrams, trigrams).
+Higher-order contexts (5-grams) capture longer-range dependencies and produce more accurate predictions when corpus patterns match the query. The adaptive algorithm automatically falls back to lower orders when high-order contexts aren't available, providing robustness.
 
 ### Why No Pruning?
 
-Preserves the complete empirical distribution from corpus. Removing low-frequency transitions would bias sampling and break probabilistic guarantees.
+Preserves the complete empirical distribution from corpus. Removing low-frequency transitions would bias sampling and break probabilistic guarantees. The sparse graph representation makes this efficient.
+
+### Why O(1) Context Index?
+
+With max_order=5, we could check 5 graphs sequentially. The context index allows single dictionary lookups instead, making order matching extremely fast.
 
 ### Edge Cases
 
-- **Unknown starting token**: Falls back to most frequent token in graph
-- **Dead ends**: Returns partial draft (< k tokens)
-- **Empty corpus**: Works with any size corpus, no minimum validation
+- **No context matches any order**: Returns empty draft, verifier generates 1 token
+- **Dead ends mid-draft**: Returns partial draft, sends to verifier
+- **Prompt shorter than max_order**: Starts matching from lower orders
+- **Cross-file boundaries**: N-grams can span file boundaries (corpus treated as unified)
+
+## Visualization
+
+Visualize the multi-order graph structure:
+
+```bash
+cd examples
+python visualize_graph.py llama_knowledge_graph.pkl --max-nodes 100 --min-weight 0.1
+```
+
+- **Green nodes**: Individual tokens (order-1 contexts)
+- **Orange nodes**: N-gram contexts (orders 2-5)
+- **Edge width**: Proportional to transition probability
+- **Hover**: See full context text and probabilities
 
 ## Requirements
 
-- Python 3.14+
+- Python 3.13+
 - See `pyproject.toml` for dependencies
 
 ## License
