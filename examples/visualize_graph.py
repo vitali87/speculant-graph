@@ -58,23 +58,35 @@ def visualize_graph(
 
     logger.info("Adding nodes to visualization...")
     for node_id, data in subgraph.nodes(data=True):
-        token_text = tokenizer.decode([node_id])
-        count = data.get('count', 0)
+        if isinstance(node_id, tuple):
+            token_text = tokenizer.decode(list(node_id))
+            order = len(node_id)
+            count = 0
+            display_text = f"O{order}: {token_text}"
+            node_str = str(node_id)
+        else:
+            token_text = tokenizer.decode([node_id])
+            count = data.get('count', 0)
+            display_text = token_text
+            node_str = str(node_id)
 
-        display_text = token_text.replace('\n', '\\n').replace('\t', '\\t')
+        display_text = display_text.replace('\n', '\\n').replace('\t', '\\t')
         if len(display_text) > 20:
             display_text = display_text[:20] + "..."
 
-        size = min(10 + (count * 2), 50)
+        size = min(10 + (count * 2), 50) if isinstance(node_id, int) else 15
 
-        title = f"Token ID: {node_id}\nText: '{token_text}'\nCount: {count}"
+        if isinstance(node_id, tuple):
+            title = f"Order-{order} context\nTokens: {node_id}\nText: '{token_text}'"
+        else:
+            title = f"Token ID: {node_id}\nText: '{token_text}'\nCount: {count}"
 
         net.add_node(
-            node_id,
+            node_str,
             label=display_text,
             title=title,
             size=size,
-            color="#00ff41"
+            color="#00ff41" if isinstance(node_id, int) else "#ff9900"
         )
 
     logger.info("Adding edges to visualization...")
@@ -86,16 +98,24 @@ def visualize_graph(
         if weight < min_edge_weight:
             continue
 
-        from_text = tokenizer.decode([from_node])
-        to_text = tokenizer.decode([to_node])
+        if isinstance(from_node, tuple):
+            from_text = tokenizer.decode(list(from_node))
+        else:
+            from_text = tokenizer.decode([from_node])
 
-        title = f"'{from_text}' → '{to_text}'\nProb: {weight:.3f}\nCount: {count}"
+        if isinstance(to_node, tuple):
+            to_text = tokenizer.decode(list(to_node))
+        else:
+            to_text = tokenizer.decode([to_node])
+
+        order = data.get('order', 1)
+        title = f"Order-{order}\n'{from_text}' → '{to_text}'\nProb: {weight:.3f}\nCount: {count}"
 
         edge_width = max(0.5, weight * 10)
 
         net.add_edge(
-            from_node,
-            to_node,
+            str(from_node),
+            str(to_node),
             title=title,
             width=edge_width,
             color="#888888"
