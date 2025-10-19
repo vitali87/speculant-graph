@@ -68,13 +68,13 @@ def main():
         logger.info(f"Using existing graph: {graph_path}")
 
     verifier_config = VerifierConfig(model_name=MODEL_NAME, hf_token=HF_TOKEN)
-    # Note: attentive_mix=True by default; explicitly set for clarity
     draft_config = DraftConfig(
         k=8,
-        strategy="sampling",
+        strategy="greedy",
         attentive_mix=True,
         order_bias=1.0,
-        mix_temperature=1.0,
+        mix_temperature=0.5,
+        entropy_penalty=1.5,
     )
 
     logger.info(

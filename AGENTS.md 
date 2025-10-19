@@ -10,3 +10,10 @@
 
 ## Testing instructions
 - Add or update tests for the code you change, even if nobody asked.
+
+## Version Control
+- Commits must follow the simplest conventional git commit formats, like "feat: bla bla"
+- Commits cannot be specific - they have to convey the MEANING of the changes.
+- Commits must be very very short. 
+- Each commit cannot be muliline. 
+- Separate into multiple `-m` commit messages if you have to.
