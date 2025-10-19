@@ -29,6 +29,16 @@ class DraftConfig(BaseModel):
     mix_temperature: float = Field(
         default=1.0, gt=0.0, description="Temperature for attention softmax"
     )
+    reliability_weight: float = Field(
+        default=1.0,
+        gt=0.0,
+        description="Weight for log-count reliability term in attention",
+    )
+    entropy_penalty: float = Field(
+        default=0.5,
+        ge=0.0,
+        description="Penalty coefficient for distribution entropy",
+    )
 
 
 class VerifierConfig(BaseModel):

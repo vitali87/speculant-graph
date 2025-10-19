@@ -274,12 +274,18 @@ class DraftGenerator:
         logger.debug(f"Most frequent token: {most_frequent} (count: {max_count})")
         return most_frequent
 
-    def _get_successor_dist(self, ctx: tuple[int, ...]) -> dict[int, float]:
-        """Get {token_id: prob} distribution for a context."""
+    def _get_context_stats(self, ctx: tuple[int, ...]) -> tuple[dict[int, float], int]:
+        """Get successor dist and total count in single pass."""
         dist = {}
+        total_count = 0
         for _, tok, attr in self.graph.out_edges(ctx, data=True):
             dist[tok] = float(attr.get("weight", 0.0))
-        return dist
+            total_count += int(attr.get("count", 0))
+        return dist, total_count
+
+    def _compute_context_entropy(self, dist: dict[int, float]) -> float:
+        """Compute Shannon entropy of successor distribution."""
+        return -sum(p * math.log(p) for p in dist.values() if p > 0)
 
     def _mix_contexts(self, context: list[int]) -> dict[int, float]:
         """
@@ -288,7 +294,7 @@ class DraftGenerator:
         """
         orders, contexts = [], []
 
-        # Collect all matching contexts from high to low order
+        # Collect matching contexts
         for o in range(self.max_order, 0, -1):
             if len(context) < o:
                 continue
@@ -300,30 +306,54 @@ class DraftGenerator:
         if not contexts:
             return {}
 
-        # Compute attention weights: prefer higher orders
+        # Cache dist/count/entropy, compute scores, guard zero-mass
         beta = self.config.order_bias
+        alpha = self.config.entropy_penalty
         tau = self.config.mix_temperature
-        scores = [beta * (o - 1) / tau for o in orders]
+        reliability = self.config.reliability_weight
 
-        # Numerically stable softmax
+        context_data = []
+        scores = []
+
+        for o, ctx in zip(orders, contexts):
+            P_j, count = self._get_context_stats(ctx)
+            if not P_j or count == 0:
+                continue  # skip empty or zero-mass
+
+            entropy = self._compute_context_entropy(P_j)
+            score = (
+                beta * math.log1p(o - 1)
+                + reliability * math.log1p(count)
+                - alpha * entropy
+            )
+
+            context_data.append((o, ctx, P_j, count, entropy, score))
+            scores.append(score / tau)
+
+        if not scores:
+            return {}  # bail if all contexts invalid
+
+        # Softmax
         max_score = max(scores)
         exps = [math.exp(s - max_score) for s in scores]
         Z = sum(exps)
         attn_weights = [e / Z for e in exps]
 
-        logger.debug(
-            f"Mixing {len(contexts)} orders: "
-            f"{list(zip(orders, [f'{a:.3f}' for a in attn_weights]))}"
-        )
+        # Log AFTER weights computed
+        logger.debug(f"Mixing {len(context_data)} orders:")
+        for (o, _, _, count, entropy, score), weight in zip(context_data, attn_weights):
+            logger.debug(
+                f"  Order-{o}: count={count}, H={entropy:.2f}, "
+                f"score={score:.2f}, w={weight:.3f}"
+            )
 
-        # Mix successor distributions
+        # Mix using cached distributions (no re-fetch)
         q_mix = defaultdict(float)
-        for a, ctx in zip(attn_weights, contexts):
-            P_j = self._get_successor_dist(ctx)
+        for (_, _, P_j, _, _, _), a in zip(context_data, attn_weights):
             for tok, prob in P_j.items():
                 q_mix[tok] += a * prob
 
-        # Normalize (defensive)
+        # Normalize
         Z_q = sum(q_mix.values())
         if Z_q > 0:
             for tok in list(q_mix.keys()):

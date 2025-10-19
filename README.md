@@ -119,9 +119,11 @@ matched order distributions. Example weights:
 draft_config = DraftConfig(
     k=8,
     strategy="greedy",
-    attentive_mix=True,      # Default: True
-    order_bias=1.0,          # β: preference for higher orders
-    mix_temperature=1.0,     # τ: softmax temperature
+    attentive_mix=True,       # Default: True
+    order_bias=1.0,           # β: preference for higher orders
+    mix_temperature=1.0,      # τ: softmax temperature
+    reliability_weight=1.0,   # Weight for log-count reliability
+    entropy_penalty=0.5,      # Penalty for uncertain distributions
 )
 ```
 
@@ -134,6 +136,12 @@ draft_config = DraftConfig(
   - `0.5`: Sharp (winner-take-all)
   - `1.0`: Balanced (default)
   - `2.0`: Soft (more uniform)
+- `reliability_weight`: Weight for log-count reliability term
+  - Higher values → favor well-supported contexts
+  - Default: `1.0`
+- `entropy_penalty`: Penalty coefficient for distribution entropy
+  - Higher values → favor confident (peaked) distributions
+  - Default: `0.5`
 
 **Disable mixing (use single highest-order context):**
 ```python
@@ -231,6 +239,8 @@ All parameters are managed via Pydantic models and support environment variables
 - `attentive_mix`: Enable attention-based context mixing (default: True)
 - `order_bias`: β parameter for higher-order preference (default: 1.0)
 - `mix_temperature`: τ parameter for attention sharpness (default: 1.0)
+- `reliability_weight`: Weight for log-count reliability (default: 1.0)
+- `entropy_penalty`: Penalty for distribution entropy (default: 0.5)
 
 ### VerifierConfig
 - `model_name`: HuggingFace model (default: "openai/gpt-oss-20b") - **Must match graph tokenizer**
