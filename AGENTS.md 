@@ -1,0 +1,12 @@
+# Python 
+## Logging
+- Always use loguru for logging. Check the latest version on the internet before installing.
+
+## Package and Environment Management
+- Always use `uv`. Check the latest version on the internet before installing.
+
+## Code style
+- Double quotes
+
+## Testing instructions
+- Add or update tests for the code you change, even if nobody asked.

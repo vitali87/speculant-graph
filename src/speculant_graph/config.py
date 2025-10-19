@@ -18,7 +18,8 @@ class DraftConfig(BaseModel):
     k: int = Field(default=5, gt=0)
     strategy: str = Field(default="greedy", pattern="^(greedy|sampling)$")
     attentive_mix: bool = Field(
-        default=False, description="Mix multiple order contexts with attention weights"
+        default=True,
+        description="Mix multiple order contexts with attention weights",
     )
     order_bias: float = Field(
         default=1.0,
