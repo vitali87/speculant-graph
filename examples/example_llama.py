@@ -68,7 +68,18 @@ def main():
         logger.info(f"Using existing graph: {graph_path}")
 
     verifier_config = VerifierConfig(model_name=MODEL_NAME, hf_token=HF_TOKEN)
-    draft_config = DraftConfig(k=8, strategy="greedy")
+    draft_config = DraftConfig(
+        k=8,
+        strategy="greedy",
+        attentive_mix=True,
+        order_bias=1.0,
+        mix_temperature=1.0,
+    )
+
+    logger.info(
+        f"Draft config: k={draft_config.k}, strategy={draft_config.strategy}, "
+        f"attentive_mix={draft_config.attentive_mix}"
+    )
 
     decoder = SpeculativeDecoder(
         graph_path=str(graph_path),
@@ -76,7 +87,6 @@ def main():
         draft_config=draft_config,
     )
 
-    # Join all prompt arguments into a single string
     prompts = [" ".join(args.prompt)]
 
     for prompt in prompts:

@@ -50,6 +50,7 @@ class SpeculativeDecoder:
             verifier_config.model_name,
             verifier_config.hf_token,
             verifier_config.download_mode,
+            draft_config,
         )
         logger.info("N-gram graph loaded successfully")
 

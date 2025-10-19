@@ -17,6 +17,17 @@ class GraphConfig(BaseModel):
 class DraftConfig(BaseModel):
     k: int = Field(default=5, gt=0)
     strategy: str = Field(default="greedy", pattern="^(greedy|sampling)$")
+    attentive_mix: bool = Field(
+        default=False, description="Mix multiple order contexts with attention weights"
+    )
+    order_bias: float = Field(
+        default=1.0,
+        gt=0.0,
+        description="Preference for higher orders (β in e^(β(o-1)))",
+    )
+    mix_temperature: float = Field(
+        default=1.0, gt=0.0, description="Temperature for attention softmax"
+    )
 
 
 class VerifierConfig(BaseModel):

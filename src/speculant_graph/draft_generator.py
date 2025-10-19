@@ -1,4 +1,6 @@
+import math
 import random
+from collections import defaultdict
 from typing import Self, Literal
 
 import networkx as nx
@@ -6,6 +8,7 @@ from pydantic import BaseModel
 from transformers import AutoTokenizer
 from loguru import logger
 
+from speculant_graph.config import DraftConfig
 from speculant_graph.download_utils import configure_download_mode
 
 
@@ -28,6 +31,7 @@ class DraftGenerator:
         graph: nx.DiGraph,
         context_index: dict[tuple, int],
         max_order: int,
+        config: DraftConfig | None = None,
         tokenizer_name: str = "openai/gpt-oss-20b",
         hf_token: str | None = None,
         download_mode: Literal["auto", "hf_transfer", "default"] = "auto",
@@ -35,6 +39,7 @@ class DraftGenerator:
         self.graph = graph
         self.context_index = context_index
         self.max_order = max_order
+        self.config = config or DraftConfig()
 
         configure_download_mode(download_mode)
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, token=hf_token)
@@ -69,50 +74,73 @@ class DraftGenerator:
         current_context = token_ids.copy()
 
         while len(draft_tokens) < k:
-            matched_order, context_tuple = self._find_highest_order_match(
-                current_context
-            )
+            if self.config.attentive_mix:
+                # Use attentive mixing of multiple orders
+                q_mix = self._mix_contexts(current_context)
 
-            if matched_order == 0:
-                logger.debug("No matching context found in any order, stopping draft")
-                break
+                if not q_mix:
+                    logger.debug("No matching context, stopping draft")
+                    break
 
-            logger.debug(f"Matched order-{matched_order} context: {context_tuple}")
+                # Sample or greedy from mixture
+                if strategy == "greedy":
+                    next_tok = max(q_mix, key=q_mix.get)
+                    next_prob = 1.0
+                else:
+                    toks, probs = list(q_mix.keys()), list(q_mix.values())
+                    next_tok = random.choices(toks, weights=probs, k=1)[0]
+                    next_prob = q_mix[next_tok]
 
-            if strategy == "greedy":
-                next_tokens, next_probs, contexts, succs, weights = (
-                    self._generate_greedy_from_context(
-                        context_tuple, k - len(draft_tokens)
-                    )
-                )
-            elif strategy == "sampling":
-                next_tokens, next_probs, contexts, succs, weights = (
-                    self._generate_sampling_from_context(
-                        context_tuple, k - len(draft_tokens)
-                    )
-                )
+                draft_tokens.append(next_tok)
+                draft_probs.append(next_prob)
+                matched_contexts.append(tuple(current_context[-1:]))
+                successors_list.append(list(q_mix.keys()))
+                successor_weights_list.append(list(q_mix.values()))
+                current_context.append(next_tok)
+
+                tok_text = self.tokenizer.decode([next_tok])
+                logger.debug(f"Drafted (attentive): '{tok_text}'")
+
             else:
-                raise ValueError(
-                    f"Unknown strategy: {strategy}. Use 'greedy' or 'sampling'"
+                # Original: single highest order
+                matched_order, context_tuple = self._find_highest_order_match(
+                    current_context
                 )
 
-            if not next_tokens:
-                logger.debug(
-                    f"No more tokens from order-{matched_order} context, stopping draft"
-                )
-                break
+                if matched_order == 0:
+                    logger.debug("No matching context, stopping draft")
+                    break
 
-            draft_tokens.extend(next_tokens)
-            draft_probs.extend(next_probs)
-            matched_contexts.extend(contexts)
-            successors_list.extend(succs)
-            successor_weights_list.extend(weights)
-            current_context.extend(next_tokens)
+                logger.debug(f"Matched order-{matched_order} context: {context_tuple}")
 
-            context_text = self.tokenizer.decode(next_tokens)
-            logger.debug(
-                f"Generated {len(next_tokens)} tokens from order-{matched_order}: '{context_text}'"
-            )
+                if strategy == "greedy":
+                    next_tokens, next_probs, contexts, succs, weights = (
+                        self._generate_greedy_from_context(
+                            context_tuple, k - len(draft_tokens)
+                        )
+                    )
+                elif strategy == "sampling":
+                    next_tokens, next_probs, contexts, succs, weights = (
+                        self._generate_sampling_from_context(
+                            context_tuple, k - len(draft_tokens)
+                        )
+                    )
+                else:
+                    raise ValueError(f"Unknown strategy: '{strategy}'")
+
+                if not next_tokens:
+                    logger.debug("No more tokens, stopping draft")
+                    break
+
+                draft_tokens.extend(next_tokens)
+                draft_probs.extend(next_probs)
+                matched_contexts.extend(contexts)
+                successors_list.extend(succs)
+                successor_weights_list.extend(weights)
+                current_context.extend(next_tokens)
+
+                context_text = self.tokenizer.decode(next_tokens)
+                logger.debug(f"Generated: '{context_text}'")
 
         terminated_early = len(draft_tokens) < k
         termination_reason = None
@@ -229,13 +257,13 @@ class DraftGenerator:
     def get_most_frequent_token(self) -> int:
         """
         Returns the token with the highest count from the graph.
-        Used as a fallback starter token for empty prompts when no special tokens exist.
+        Used as a fallback for empty prompts.
         """
         max_count = 0
         most_frequent = 0
 
         for node in self.graph.nodes():
-            # Only check token nodes (int), not n-gram context nodes (tuple)
+            # Only check token nodes (int)
             if isinstance(node, int):
                 node_data = self.graph.nodes[node]
                 count = node_data.get("count", 0)
@@ -243,10 +271,65 @@ class DraftGenerator:
                     max_count = count
                     most_frequent = node
 
-        logger.debug(
-            f"Most frequent token in graph: {most_frequent} (count: {max_count})"
-        )
+        logger.debug(f"Most frequent token: {most_frequent} (count: {max_count})")
         return most_frequent
+
+    def _get_successor_dist(self, ctx: tuple[int, ...]) -> dict[int, float]:
+        """Get {token_id: prob} distribution for a context."""
+        dist = {}
+        for _, tok, attr in self.graph.out_edges(ctx, data=True):
+            dist[tok] = float(attr.get("weight", 0.0))
+        return dist
+
+    def _mix_contexts(self, context: list[int]) -> dict[int, float]:
+        """
+        Mix multiple order contexts with attention weights.
+        Returns q_mix = Σ attention_j * P_j(·)
+        """
+        orders, contexts = [], []
+
+        # Collect all matching contexts from high to low order
+        for o in range(self.max_order, 0, -1):
+            if len(context) < o:
+                continue
+            ctx = tuple(context[-o:])
+            if ctx in self.context_index:
+                orders.append(o)
+                contexts.append(ctx)
+
+        if not contexts:
+            return {}
+
+        # Compute attention weights: prefer higher orders
+        beta = self.config.order_bias
+        tau = self.config.mix_temperature
+        scores = [beta * (o - 1) / tau for o in orders]
+
+        # Numerically stable softmax
+        max_score = max(scores)
+        exps = [math.exp(s - max_score) for s in scores]
+        Z = sum(exps)
+        attn_weights = [e / Z for e in exps]
+
+        logger.debug(
+            f"Mixing {len(contexts)} orders: "
+            f"{list(zip(orders, [f'{a:.3f}' for a in attn_weights]))}"
+        )
+
+        # Mix successor distributions
+        q_mix = defaultdict(float)
+        for a, ctx in zip(attn_weights, contexts):
+            P_j = self._get_successor_dist(ctx)
+            for tok, prob in P_j.items():
+                q_mix[tok] += a * prob
+
+        # Normalize (defensive)
+        Z_q = sum(q_mix.values())
+        if Z_q > 0:
+            for tok in list(q_mix.keys()):
+                q_mix[tok] /= Z_q
+
+        return dict(q_mix)
 
     @classmethod
     def from_file(
@@ -255,6 +338,7 @@ class DraftGenerator:
         tokenizer_name: str = "openai/gpt-oss-20b",
         hf_token: str | None = None,
         download_mode: Literal["auto", "hf_transfer", "default"] = "auto",
+        config: DraftConfig | None = None,
     ) -> Self:
         from speculant_graph.graph_builder import GraphBuilder
 
@@ -265,5 +349,11 @@ class DraftGenerator:
         max_order = metadata.get("max_order", 1)
 
         return cls(
-            graph, context_index, max_order, tokenizer_name, hf_token, download_mode
+            graph=graph,
+            context_index=context_index,
+            max_order=max_order,
+            config=config,
+            tokenizer_name=tokenizer_name,
+            hf_token=hf_token,
+            download_mode=download_mode,
         )

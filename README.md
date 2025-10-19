@@ -8,8 +8,12 @@ Traditional speculative decoding uses a small draft model to propose tokens that
 
 ### Key Innovation
 
-- **Multi-order Markov Chains**: Adaptively uses 1st through 5th order context for accurate predictions
-- **Adaptive order selection**: Automatically selects highest available order for each prediction
+- **Multi-order Markov Chains**: Adaptively uses 1st through 5th order 
+context for accurate predictions
+- **Attentive Context Mixing**: Optional attention mechanism that blends 
+multiple n-gram orders for smoother, more robust proposals
+- **Adaptive order selection**: Automatically selects highest available 
+order for each prediction
 - **Zero training**: No need to train or maintain a separate draft model
 - **Domain-specific**: Graph captures patterns from user-supplied corpora (law, finance, healthcare, etc.)
 - **Transparent**: All transitions are traceable to source text with O(1) context lookup
@@ -95,6 +99,53 @@ print(result.text)
 print(f"Acceptance rate: {result.acceptance_rate:.2%}")
 ```
 
+### 3. Attentive Context Mixing (Advanced)
+
+Instead of using just the highest-order context, **mix multiple contexts** 
+with attention weights for more robust, smoother proposals.
+
+```python
+draft_config = DraftConfig(
+    k=8,
+    strategy="greedy",
+    attentive_mix=True,      # Enable mixing
+    order_bias=1.0,          # β: preference for higher orders
+    mix_temperature=1.0,     # τ: softmax temperature
+)
+
+decoder = SpeculativeDecoder(
+    graph_path="ngram_graph.pkl",
+    verifier_config=VerifierConfig(model_name="meta-llama/Llama-3.2-3B"),
+    draft_config=draft_config
+)
+```
+
+**How it works:** Computes attention weights via softmax, then mixes all 
+matched order distributions. Example weights:
+- Order-5: 63.6% (most specific)
+- Order-4: 23.4%
+- Order-3: 8.6%
+- Order-2: 3.2%
+- Order-1: 1.2% (most general)
+
+**Configuration:**
+- `order_bias` (β): Controls preference for higher orders
+  - `0.5`: Gentle preference (more mixing)
+  - `1.0`: Balanced (recommended)
+  - `2.0`: Strong preference (less mixing)
+- `mix_temperature` (τ): Controls sharpness of attention
+  - `0.5`: Sharp (winner-take-all)
+  - `1.0`: Balanced (recommended)
+  - `2.0`: Soft (more uniform)
+
+**When to use:**
+- ✅ Corpus has varied phrase frequencies
+- ✅ Want more robust, less brittle drafts
+- ✅ Acceptance rate is low with single-order matching
+- ❌ Corpus is very uniform
+- ❌ Need absolute fastest performance (~5-10% overhead)
+- ❌ High-order contexts already have good coverage
+
 ## Using Different Models
 
 **The system works with ANY HuggingFace model!** You can use Llama, Mistral, Qwen, GPT-OSS, or any other model.
@@ -168,6 +219,9 @@ All parameters are managed via Pydantic models and support environment variables
 ### DraftConfig
 - `k`: Number of tokens to draft (default: 5)
 - `strategy`: "greedy" or "sampling" (default: "greedy")
+- `attentive_mix`: Enable attention-based context mixing (default: False)
+- `order_bias`: β parameter for higher-order preference (default: 1.0)
+- `mix_temperature`: τ parameter for attention sharpness (default: 1.0)
 
 ### VerifierConfig
 - `model_name`: HuggingFace model (default: "openai/gpt-oss-20b") - **Must match graph tokenizer**
