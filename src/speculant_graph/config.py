@@ -39,6 +39,18 @@ class VerifierConfig(BaseModel):
         default="auto",
         description="Download acceleration mode: 'auto' uses hf_xet if available, 'hf_transfer' for high-bandwidth, 'default' for standard downloads",
     )
+    torch_dtype: str | None = Field(
+        default="bfloat16",
+        description="PyTorch dtype for model weights: 'float16', 'bfloat16', 'float32', or None for auto",
+    )
+    device_map: str | None = Field(
+        default="auto",
+        description="Device map for model loading: 'auto', 'balanced', 'sequential', or None",
+    )
+    low_cpu_mem_usage: bool = Field(
+        default=True,
+        description="Use low CPU memory mode during model loading to reduce memory peaks",
+    )
 
 
 class GenerationConfig(BaseModel):

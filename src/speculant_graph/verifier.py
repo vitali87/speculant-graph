@@ -30,19 +30,46 @@ class SpeculativeDecoder:
 
         configure_download_mode(verifier_config.download_mode)
 
+        # Parse torch_dtype
+        dtype_map = {
+            "float16": torch.float16,
+            "bfloat16": torch.bfloat16,
+            "float32": torch.float32,
+        }
+        torch_dtype = (
+            dtype_map.get(verifier_config.torch_dtype)
+            if verifier_config.torch_dtype
+            else None
+        )
+
         logger.info(f"Loading verifier model: {verifier_config.model_name}")
+        logger.info(
+            f"Memory config: dtype={verifier_config.torch_dtype}, "
+            f"device_map={verifier_config.device_map}, "
+            f"low_cpu_mem_usage={verifier_config.low_cpu_mem_usage}"
+        )
+
         self.model = AutoModelForCausalLM.from_pretrained(
-            verifier_config.model_name, token=verifier_config.hf_token
+            verifier_config.model_name,
+            token=verifier_config.hf_token,
+            dtype=torch_dtype,
+            device_map=verifier_config.device_map,
+            low_cpu_mem_usage=verifier_config.low_cpu_mem_usage,
         )
         self.tokenizer = AutoTokenizer.from_pretrained(
             verifier_config.model_name, token=verifier_config.hf_token
         )
 
-        self.device = verifier_config.device or (
-            "cuda" if torch.cuda.is_available() else "cpu"
-        )
-        self.model.to(self.device)
-        logger.info(f"Model loaded on device: {self.device}")
+        # Determine device - if device_map is used, don't manually move the model
+        if verifier_config.device_map:
+            self.device = next(self.model.parameters()).device
+            logger.info(f"Model loaded with device_map: {verifier_config.device_map}")
+        else:
+            self.device = verifier_config.device or (
+                "cuda" if torch.cuda.is_available() else "cpu"
+            )
+            self.model.to(self.device)
+            logger.info(f"Model loaded on device: {self.device}")
 
         logger.info(f"Loading n-gram graph from: {graph_path}")
         self.draft_generator = DraftGenerator.from_file(
