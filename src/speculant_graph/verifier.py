@@ -56,6 +56,8 @@ class SpeculativeDecoder:
             device_map=verifier_config.device_map,
             low_cpu_mem_usage=verifier_config.low_cpu_mem_usage,
         )
+        if hasattr(self.model.config, "use_cache"):
+            self.model.config.use_cache = True
         self.tokenizer = AutoTokenizer.from_pretrained(
             verifier_config.model_name, token=verifier_config.hf_token
         )
@@ -80,6 +82,7 @@ class SpeculativeDecoder:
             draft_config,
         )
         logger.info("N-gram graph loaded successfully")
+        self._reset_verifier_cache()
 
     def generate(
         self, prompt: str, generation_config: GenerationConfig
@@ -133,6 +136,9 @@ class SpeculativeDecoder:
 
             input_ids = torch.tensor([[starter_token]], device=self.device)
 
+        self._reset_verifier_cache()
+        self._prime_verifier_state(input_ids)
+
         generated_tokens = input_ids[0].tolist()
         prompt_length = len(input_ids[0])
 
@@ -159,7 +165,7 @@ class SpeculativeDecoder:
                     "Draft generator returned empty sequence, generating from verifier"
                 )
                 verifier_count, new_tokens = self._generate_from_verifier(
-                    generated_tokens, count=1, temperature=generation_config.temperature
+                    count=1, temperature=generation_config.temperature
                 )
                 num_verifier_generated += verifier_count
                 generated_tokens.extend(new_tokens)
@@ -219,7 +225,7 @@ class SpeculativeDecoder:
             if accepted_count == 0 and not has_correction:
                 logger.info("→ Generating fallback token from verifier model...")
                 verifier_count, fallback_tokens = self._generate_from_verifier(
-                    generated_tokens, count=1, temperature=generation_config.temperature
+                    count=1, temperature=generation_config.temperature
                 )
                 fallback_text = self.tokenizer.decode(
                     fallback_tokens, skip_special_tokens=True
@@ -261,6 +267,56 @@ class SpeculativeDecoder:
             total_tokens=len(generated_tokens) - prompt_length,
         )
 
+    def _reset_verifier_cache(self) -> None:
+        self.past_key_values = None
+        self.attention_mask = None
+        self.last_logits = None
+
+    def _prime_verifier_state(self, input_ids: torch.Tensor) -> None:
+        attention_mask = torch.ones(
+            (1, input_ids.shape[1]), device=self.device, dtype=torch.long
+        )
+        with torch.no_grad():
+            outputs = self.model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                use_cache=True,
+            )
+        self.past_key_values = outputs.past_key_values
+        self.attention_mask = attention_mask
+        self.last_logits = outputs.logits[:, -1, :]
+
+    def _append_token(self, token_id: int) -> None:
+        if self.attention_mask is None or self.past_key_values is None:
+            raise RuntimeError("Verifier cache not initialized")
+
+        token_tensor = torch.tensor([[token_id]], device=self.device)
+        new_attention_mask = torch.cat(
+            [
+                self.attention_mask,
+                torch.ones((1, 1), device=self.device, dtype=torch.long),
+            ],
+            dim=1,
+        )
+
+        with torch.no_grad():
+            outputs = self.model(
+                input_ids=token_tensor,
+                attention_mask=new_attention_mask,
+                past_key_values=self.past_key_values,
+                use_cache=True,
+            )
+
+        self.past_key_values = outputs.past_key_values
+        self.attention_mask = new_attention_mask
+        self.last_logits = outputs.logits[:, -1, :]
+
+    def _next_token_distribution(self, temperature: float) -> torch.Tensor:
+        if self.last_logits is None:
+            raise RuntimeError("Verifier cache not initialized")
+        logits = self.last_logits.squeeze(0) / temperature
+        return torch.softmax(logits, dim=-1)
+
     def _verify_draft(
         self,
         context_tokens: list[int],
@@ -272,86 +328,74 @@ class SpeculativeDecoder:
         strategy: str,
         temperature: float,
     ) -> tuple[int, int, list[int], bool]:
-        full_sequence = context_tokens + draft_tokens
-        input_ids = torch.tensor([full_sequence], device=self.device)
-
-        with torch.no_grad():
-            outputs = self.model(input_ids)
-            all_logits = outputs.logits[0, :, :]
+        if self.last_logits is None:
+            raise RuntimeError("Verifier cache not initialized")
 
         accepted_tokens = []
         num_actually_accepted = 0
         has_correction = False
-        context_len = len(context_tokens)
 
         for i, draft_token in enumerate(draft_tokens):
-            position = context_len + i - 1
-            logits = all_logits[position, :] / temperature
-            target_probs = torch.softmax(logits, dim=-1)
-
+            target_probs = self._next_token_distribution(temperature)
             target_prob = target_probs[draft_token].item()
 
             if strategy == "greedy":
                 acceptance_prob = target_prob
             else:
                 draft_prob = draft_probs[i]
-                acceptance_prob = min(1.0, target_prob / draft_prob)
+                if draft_prob <= 0.0:
+                    acceptance_prob = 1.0
+                else:
+                    acceptance_prob = min(1.0, target_prob / draft_prob)
 
             if random.random() < acceptance_prob:
                 accepted_tokens.append(draft_token)
                 num_actually_accepted += 1
+                self._append_token(draft_token)
+                continue
+
+            if strategy == "greedy":
+                residual = target_probs.clone()
+                residual[draft_token] = 0.0
             else:
-                if strategy == "greedy":
-                    p_cond = target_probs.clone()
-                    p_cond[draft_token] = 0.0
-                    residual = p_cond
-                else:
-                    succ = successors[i]
-                    q_weights = successor_weights[i]
-
-                    q = torch.zeros_like(target_probs)
-                    q[succ] = torch.tensor(
-                        q_weights, device=target_probs.device, dtype=target_probs.dtype
+                succ = successors[i]
+                q = torch.zeros_like(target_probs)
+                if succ:
+                    q_weights = torch.tensor(
+                        successor_weights[i],
+                        device=target_probs.device,
+                        dtype=target_probs.dtype,
                     )
+                    q[succ] = q_weights
+                residual = torch.clamp(target_probs - q, min=0.0)
+                if residual.sum().item() == 0.0:
+                    residual = target_probs.clone()
+                    residual[draft_token] = 0.0
 
-                    residual = torch.clamp(target_probs - q, min=0.0)
-
-                    residual_sum = residual.sum().item()
-                    if residual_sum == 0.0:
-                        p_cond = target_probs.clone()
-                        p_cond[draft_token] = 0.0
-                        residual = p_cond
-                        residual_sum = residual.sum().item()
-
-                residual_sum = residual.sum().item()
-                if residual_sum > 0.0:
-                    residual = residual / residual_sum
-                    corrected_token = torch.multinomial(residual, num_samples=1).item()
-                    accepted_tokens.append(corrected_token)
-                    has_correction = True
-
-                break
+            residual_sum = residual.sum().item()
+            if residual_sum > 0.0:
+                residual = residual / residual_sum
+                corrected_token = torch.multinomial(residual, num_samples=1).item()
+                accepted_tokens.append(corrected_token)
+                has_correction = True
+                self._append_token(corrected_token)
+            break
 
         rejected_count = len(draft_tokens) - num_actually_accepted
         return num_actually_accepted, rejected_count, accepted_tokens, has_correction
 
     def _generate_from_verifier(
-        self, context_tokens: list[int], count: int, temperature: float
+        self, count: int, temperature: float
     ) -> tuple[int, list[int]]:
-        input_ids = torch.tensor([context_tokens], device=self.device)
+        if self.last_logits is None:
+            raise RuntimeError("Verifier cache not initialized")
+
         generated = []
 
         for _ in range(count):
-            with torch.no_grad():
-                outputs = self.model(input_ids)
-                logits = outputs.logits[0, -1, :] / temperature
-                probs = torch.softmax(logits, dim=-1)
-
-                next_token = torch.multinomial(probs, num_samples=1).item()
-                generated.append(next_token)
-
-                input_ids = torch.cat(
-                    [input_ids, torch.tensor([[next_token]], device=self.device)], dim=1
-                )
+            probs = self._next_token_distribution(temperature)
+            next_token = torch.multinomial(probs, num_samples=1).item()
+            generated.append(next_token)
+            self._append_token(next_token)
 
         return len(generated), generated
