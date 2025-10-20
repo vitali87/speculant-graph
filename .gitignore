@@ -206,5 +206,6 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
- examples/graph_viz.html
+graph_viz.html
+examples/graph_viz.html
 examples/*.pkl

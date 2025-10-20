@@ -21,6 +21,11 @@ dev = [
     "pytest>=8.4.2",
     "pytest-cov>=7.0.0",
 ]
+server = [
+    "fastapi>=0.119.0",
+    "uvicorn[standard]>=0.38.0",
+    "requests>=2.32.5",
+]
 
 [build-system]
 requires = ["hatchling"]

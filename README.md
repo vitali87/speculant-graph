@@ -21,7 +21,7 @@ context lookup
 ## Installation
 
 ```bash
-uv pip install -e .
+uv sync
 ```
 
 ### Development Setup
@@ -34,7 +34,7 @@ This project uses pre-commit hooks to maintain code quality:
 Setup pre-commit hooks:
 
 ```bash
-uv add --dev pre-commit
+uv sync --extra dev
 pre-commit install
 pre-commit install --hook-type commit-msg
 ```
@@ -274,10 +274,10 @@ Control HuggingFace model download speeds with the `download_mode` configuration
 
 ```bash
 # For auto mode (default, recommended)
-pip install -U "huggingface_hub"
+uv add huggingface_hub
 
 # For hf_transfer mode (high-bandwidth only)
-pip install "huggingface_hub[hf_transfer]"
+uv add "huggingface_hub[hf_transfer]"
 ```
 
 ### Usage
@@ -339,6 +339,80 @@ The verifier model uses **rejection sampling** to accept or reject draft tokens,
   - Fallback: if residual sums to 0, sample from `P_target` conditioned on `y ≠ x`
 
 This method guarantees the output distribution is identical to autoregressive generation from the verifier.
+
+## Server Mode (No Model Reloading!)
+
+To avoid reloading model weights into GPU memory on every run, use the 
+server mode. The server loads the model once at startup and keeps it in 
+memory for fast repeated inference.
+
+### Installation
+
+```bash
+uv sync --extra server
+```
+
+### Starting the Server
+
+```bash
+# Basic usage (uses default model)
+uv run --extra server server/app.py \
+  --graph-path examples/ngram_graph.pkl
+
+# With custom model
+uv run --extra server server/app.py \
+  --graph-path examples/seed_ngram_graph.pkl \
+  --model-name ByteDance-Seed/Seed-OSS-36B-Instruct \
+  --k 8 \
+  --strategy greedy \
+  --host 0.0.0.0 \
+  --port 8000
+```
+
+The server exposes two endpoints:
+- `GET /health` - Health check with model info
+- `POST /generate` - Generate text from a prompt
+
+### Using the Client
+
+```bash
+# In another terminal, run the client example
+uv run --extra server examples/example_client.py
+
+# With custom settings
+uv run --extra server examples/example_client.py \
+  --url http://localhost:8000 \
+  --max-tokens 100 \
+  --temperature 0.9
+```
+
+### Client Code Example
+
+```python
+from examples.example_client import SpeculativeDecoderClient
+
+client = SpeculativeDecoderClient(base_url="http://127.0.0.1:8000")
+
+# Check health
+health = client.health()
+print(f"Model: {health.model_name}")
+
+# Generate (model stays loaded between requests!)
+result = client.generate(
+    prompt="What is a force majeure clause?",
+    max_tokens=50,
+    temperature=0.9
+)
+print(result.text)
+print(f"Acceptance rate: {result.acceptance_rate:.2%}")
+```
+
+### Benefits
+- ✅ Load model once, use many times
+- ✅ No GPU memory reloading between requests
+- ✅ RESTful API for easy integration
+- ✅ Multiple clients can connect simultaneously
+- ✅ Ideal for interactive development and testing
 
 ## Example
 

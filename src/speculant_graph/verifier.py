@@ -181,7 +181,6 @@ class SpeculativeDecoder:
             num_draft_accepted += accepted_count
             num_draft_rejected += rejected_count
 
-            # Log detailed results
             if accepted_count > 0:
                 accepted_draft = draft_result.token_ids[:accepted_count]
                 accepted_text = self.tokenizer.decode(
