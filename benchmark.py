@@ -185,12 +185,20 @@ def main() -> None:
         logger.remove()
         logger.add(sys.stderr, level="ERROR")
 
+    device_map = args.device_map
+    if device_map is not None and device_map.lower() == "none":
+        device_map = None
+
+    torch_dtype = args.torch_dtype
+    if torch_dtype is not None and torch_dtype.lower() == "none":
+        torch_dtype = None
+
     verifier_config = VerifierConfig(
         model_name=args.model_name,
         device=args.device,
         hf_token=args.hf_token,
-        torch_dtype=args.torch_dtype,
-        device_map=args.device_map,
+        torch_dtype=torch_dtype,
+        device_map=device_map,
     )
     draft_config = DraftConfig(k=args.draft_k, strategy=args.draft_strategy)
     generation_config = GenerationConfig(
