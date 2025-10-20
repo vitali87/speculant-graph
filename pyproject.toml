@@ -20,6 +20,7 @@ dependencies = [
 dev = [
     "pytest>=8.4.2",
     "pytest-cov>=7.0.0",
+    "ruff>=0.14.1",
 ]
 server = [
     "fastapi>=0.119.0",

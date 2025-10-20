@@ -8,7 +8,7 @@ from speculant_graph.config import (
     DraftConfig,
     VerifierConfig,
     GenerationConfig,
-    SpeculativeDecodingConfig
+    SpeculativeDecodingConfig,
 )
 
 __all__ = [

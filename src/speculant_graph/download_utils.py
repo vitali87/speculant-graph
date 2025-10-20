@@ -7,8 +7,11 @@ def configure_download_mode(mode: Literal["auto", "hf_transfer", "default"]) -> 
     if mode == "hf_transfer":
         try:
             import hf_transfer  # noqa: F401
+
             os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
-            logger.info("Download acceleration enabled: hf_transfer (optimized for high-bandwidth)")
+            logger.info(
+                "Download acceleration enabled: hf_transfer (optimized for high-bandwidth)"
+            )
         except ImportError:
             logger.warning(
                 "hf_transfer requested but not installed. "
@@ -23,4 +26,6 @@ def configure_download_mode(mode: Literal["auto", "hf_transfer", "default"]) -> 
         os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
         logger.info("Download acceleration: disabled (using standard downloads)")
     else:
-        raise ValueError(f"Invalid download_mode: {mode}. Must be 'auto', 'hf_transfer', or 'default'")
+        raise ValueError(
+            f"Invalid download_mode: {mode}. Must be 'auto', 'hf_transfer', or 'default'"
+        )
