@@ -182,11 +182,14 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     args = _parse_args()
 
-    logger.remove()
-    if args.verbose:
-        logger.add(sys.stderr, level="DEBUG")
-    else:
-        logger.add(sys.stderr, level="INFO")
+    if not args.verbose:
+        logger.remove()
+        logger.add(
+            sys.stderr,
+            filter=lambda record: record["name"] == "__main__",
+            format="{message}",
+            level="INFO",
+        )
 
     device_map = args.device_map
     if device_map is not None and device_map.lower() == "none":

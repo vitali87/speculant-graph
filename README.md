@@ -49,7 +49,7 @@ pre-commit run --all-files
 
 ### 1. Download Corpus
 
-For best results, download a substantial corpus. With **20,000 Wikipedia articles**, you can achieve **2-4x speedup**:
+For best results, download a substantial corpus. With **20,000 Wikipedia articles**, you can achieve **2-5x speedup**:
 
 ```bash
 # Download 20k Wikipedia articles (~128MB corpus)
@@ -138,7 +138,7 @@ Speedup: 2.47x faster than native decoding
 ============================================================
 ```
 
-With different prompts and settings, speedups range from **2-4x**!
+With different prompts and settings, speedups range from **2-5x**!
 
 ### 3. Attentive Context Mixing (Default)
 
