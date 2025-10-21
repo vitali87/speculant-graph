@@ -47,34 +47,42 @@ pre-commit run --all-files
 
 ## Quick Start
 
-### 1. Build Multi-Order N-gram Graph
+### 1. Download Corpus
 
-```python
-from speculant_graph import GraphBuilder, GraphConfig
+For best results, download a substantial corpus. With **20,000 Wikipedia articles**, you can achieve **2-4x speedup**:
 
-config = GraphConfig(
-    max_order=5,  # Build orders 1-5 (default)
-    tokenizer_name="meta-llama/Llama-3.2-3B"  # Must match verifier model
-)
-
-builder = GraphBuilder(
-    tokenizer_name=config.tokenizer_name,
-    max_order=config.max_order,
-    chunk_size=config.chunk_size
-)
-
-graph = builder.build_from_files(["corpus1.txt", "corpus2.txt"])
-builder.save("ngram_graph.pkl")
-
-# Graph now contains:
-# - Order 1: P(next | token_i)
-# - Order 2: P(next | token_i-1, token_i)
-# - Order 3: P(next | token_i-2, token_i-1, token_i)
-# - Order 4: P(next | token_i-3, token_i-2, token_i-1, token_i)
-# - Order 5: P(next | token_i-4, ..., token_i-1, token_i)
+```bash
+# Download 20k Wikipedia articles (~128MB corpus)
+python download_corpus.py --corpus wikipedia --max-docs 20000
 ```
 
-### 2. Generate with Speculative Decoding
+### 2. Build Multi-Order N-gram Graph
+
+```bash
+# Build graph for large model (recommended: ByteDance-Seed/Seed-OSS-36B-Instruct)
+python build_graph.py \
+  --corpus-dir examples/corpus \
+  --output graph.pkl \
+  --model-name ByteDance-Seed/Seed-OSS-36B-Instruct \
+  --max-order 5
+```
+
+Or programmatically:
+
+```python
+from speculant_graph import GraphBuilder
+
+builder = GraphBuilder(
+    tokenizer_name="ByteDance-Seed/Seed-OSS-36B-Instruct",
+    max_order=5,
+    chunk_size=10000
+)
+
+graph = builder.build_from_files(["examples/corpus/wikipedia.txt"])
+builder.save("graph.pkl")
+```
+
+### 3. Generate with Speculative Decoding
 
 ```python
 from speculant_graph import (
@@ -85,21 +93,52 @@ from speculant_graph import (
 )
 
 decoder = SpeculativeDecoder(
-    graph_path="ngram_graph.pkl",
+    graph_path="graph.pkl",
     verifier_config=VerifierConfig(
-        model_name="meta-llama/Llama-3.2-3B"
+        model_name="ByteDance-Seed/Seed-OSS-36B-Instruct"
     ),
     draft_config=DraftConfig(k=8, strategy="greedy")
 )
 
 result = decoder.generate(
-    prompt="What is a force majeure clause?",
-    generation_config=GenerationConfig(max_tokens=50, temperature=0.9)
+    prompt="What is contract law?",
+    generation_config=GenerationConfig(max_tokens=100, temperature=0.8)
 )
 
 print(result.text)
 print(f"Acceptance rate: {result.acceptance_rate:.2%}")
 ```
+
+### 4. Benchmark Performance
+
+Run the benchmark to see the speedup:
+
+```bash
+python benchmark.py \
+  --graph-path graph.pkl \
+  --model-name ByteDance-Seed/Seed-OSS-36B-Instruct \
+  --max-tokens 100 \
+  --prompt "What is contract law?"
+```
+
+**Example Results** (20k Wikipedia corpus):
+```
+Native decoding:
+  Time: 41.29s
+  Tokens/sec: 2.42
+
+Speculative decoding:
+  Time: 16.69s
+  Tokens/sec: 5.99
+  Draft acceptance rate: 21.00%
+  Position 0 acceptance: 21/100 (21.00%)
+
+============================================================
+Speedup: 2.47x faster than native decoding
+============================================================
+```
+
+With different prompts and settings, speedups range from **2-4x**!
 
 ### 3. Attentive Context Mixing (Default)
 
