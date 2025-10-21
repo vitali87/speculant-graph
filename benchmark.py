@@ -114,7 +114,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--model-name",
-        default="meta-llama/Llama-3.2-3B",
+        default="ByteDance-Seed/Seed-OSS-36B-Instruct",
         help="Verifier model name to load from Hugging Face.",
     )
     parser.add_argument(

@@ -68,7 +68,7 @@ Examples:
 
     parser.add_argument(
         "--model-name",
-        default="meta-llama/Llama-3.2-3B",
+        default="ByteDance-Seed/Seed-OSS-36B-Instruct",
         help="HuggingFace model/tokenizer name (must match verifier model!)",
     )
     parser.add_argument(

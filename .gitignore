@@ -212,3 +212,4 @@ examples/*.pkl
 *.pkl
 AGENTS.md 
 AGENTS.md
+examples/corpus/*.txt
