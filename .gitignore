@@ -210,6 +210,5 @@ graph_viz.html
 examples/graph_viz.html
 examples/*.pkl
 *.pkl
-AGENTS.md 
 AGENTS.md
 examples/corpus/*.txt

@@ -5,9 +5,12 @@ import time
 
 import torch
 from loguru import logger
+from transformers import logging as transformers_logging
 
 from speculant_graph import SpeculativeDecoder
 from speculant_graph.config import DraftConfig, GenerationConfig, VerifierConfig
+
+transformers_logging.set_verbosity_error()
 
 
 def _set_seed(seed: int | None) -> None:
@@ -179,9 +182,11 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     args = _parse_args()
 
-    if not args.verbose:
-        logger.remove()
-        logger.add(sys.stderr, level="ERROR")
+    logger.remove()
+    if args.verbose:
+        logger.add(sys.stderr, level="DEBUG")
+    else:
+        logger.add(sys.stderr, level="INFO")
 
     device_map = args.device_map
     if device_map is not None and device_map.lower() == "none":
@@ -205,14 +210,14 @@ def main() -> None:
         seed=args.seed,
     )
 
-    print("Loading speculative decoder...")
+    logger.info("Loading speculative decoder...")
     decoder = SpeculativeDecoder(
         graph_path=args.graph_path,
         verifier_config=verifier_config,
         draft_config=draft_config,
     )
 
-    print("\nRunning native verifier decoding...")
+    logger.info("Running native verifier decoding...")
     _sync_cuda()
     native_start = time.perf_counter()
     native_text, native_tokens = _native_decode(decoder, args.prompt, generation_config)
@@ -223,7 +228,7 @@ def main() -> None:
         len(native_tokens) / native_duration if native_duration > 0 else 0.0
     )
 
-    print("Running graph speculative decoding...")
+    logger.info("Running graph speculative decoding...")
     _sync_cuda()
     spec_start = time.perf_counter()
     spec_result = decoder.generate(args.prompt, generation_config)
@@ -234,34 +239,45 @@ def main() -> None:
         spec_result.total_tokens / spec_duration if spec_duration > 0 else 0.0
     )
 
-    print("\n=== Benchmark Results ===")
-    print(f"Prompt: {args.prompt!r}")
-    print(f"Tokens requested: {args.max_tokens}")
-    print("\nNative decoding:")
-    print(f"  Time: {native_duration:.2f}s")
-    print(f"  Tokens/sec: {tokens_per_second_native:.2f}")
-    print(f"  Output: {native_text}")
+    logger.info("\n=== Benchmark Results ===")
+    logger.info(f"Prompt: {args.prompt!r}")
+    logger.info(f"Tokens requested: {args.max_tokens}")
+    logger.info("\nNative decoding:")
+    logger.info(f"  Time: {native_duration:.2f}s")
+    logger.info(f"  Tokens/sec: {tokens_per_second_native:.2f}")
+    logger.info(f"  Output: {native_text}")
 
-    print("\nSpeculative decoding:")
-    print(f"  Time: {spec_duration:.2f}s")
-    print(f"  Tokens/sec: {tokens_per_second_spec:.2f}")
-    print(
+    logger.info("\nSpeculative decoding:")
+    logger.info(f"  Time: {spec_duration:.2f}s")
+    logger.info(f"  Tokens/sec: {tokens_per_second_spec:.2f}")
+    logger.info(
         f"  Draft acceptance rate: {spec_result.acceptance_rate:.2%} "
         f"({spec_result.num_accepted} accepted / "
         f"{spec_result.num_accepted + spec_result.num_rejected} proposed)"
     )
 
     if spec_result.position_proposal_counts:
-        print("\n  Position-based acceptance rates:")
+        logger.info("\n  Position-based acceptance rates:")
         max_position = max(spec_result.position_proposal_counts.keys())
         for pos in range(max_position + 1):
             proposals = spec_result.position_proposal_counts.get(pos, 0)
             acceptances = spec_result.position_acceptance_counts.get(pos, 0)
             if proposals > 0:
                 pos_rate = acceptances / proposals
-                print(f"    Position {pos}: {acceptances}/{proposals} ({pos_rate:.2%})")
+                logger.info(
+                    f"    Position {pos}: {acceptances}/{proposals} ({pos_rate:.2%})"
+                )
 
-    print(f"  Output: {spec_result.text}")
+    logger.info(f"  Output: {spec_result.text}")
+
+    speedup = (
+        tokens_per_second_spec / tokens_per_second_native
+        if tokens_per_second_native > 0
+        else 0
+    )
+    logger.info(f"\n{'=' * 60}")
+    logger.info(f"Speedup: {speedup:.2f}x faster than native decoding")
+    logger.info(f"{'=' * 60}")
 
 
 if __name__ == "__main__":
