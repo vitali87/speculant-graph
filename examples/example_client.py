@@ -1,18 +1,3 @@
-#!/usr/bin/env python3
-"""
-Client example for the Speculative Graph Decoder server.
-
-Usage:
-    # First, start the server in another terminal:
-    # uv run --extra server server/app.py --graph-path examples/ngram_graph.pkl
-
-    # Then run this client:
-    # uv run --extra server examples/example_client.py
-
-    # Or with custom prompt:
-    # uv run --extra server examples/example_client.py --prompt "Your prompt"
-"""
-
 import argparse
 from typing import Literal
 
@@ -49,7 +34,6 @@ class SpeculativeDecoderClient:
         self.base_url = base_url.rstrip("/")
 
     def health(self) -> HealthResponse:
-        """Check server health."""
         response = requests.get(f"{self.base_url}/health", timeout=5)
         response.raise_for_status()
         return HealthResponse(**response.json())
@@ -61,7 +45,6 @@ class SpeculativeDecoderClient:
         temperature: float = 0.9,
         seed: int | None = None,
     ) -> GenerateResponse:
-        """Generate text from prompt."""
         request = GenerateRequest(
             prompt=prompt,
             max_tokens=max_tokens,
@@ -88,7 +71,6 @@ def main():
 
     client = SpeculativeDecoderClient(base_url=args.url)
 
-    # Check health
     logger.info("Checking server health...")
     try:
         health = client.health()
@@ -99,7 +81,6 @@ def main():
         logger.error(f"✗ Health check failed: {e}")
         return
 
-    # Use provided prompt or defaults
     prompts = (
         [args.prompt]
         if args.prompt

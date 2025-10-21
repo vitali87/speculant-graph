@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import argparse
 import random
 import sys
@@ -214,7 +212,6 @@ def main() -> None:
         draft_config=draft_config,
     )
 
-    # Native decoding
     print("\nRunning native verifier decoding...")
     _sync_cuda()
     native_start = time.perf_counter()
@@ -226,7 +223,6 @@ def main() -> None:
         len(native_tokens) / native_duration if native_duration > 0 else 0.0
     )
 
-    # Speculative decoding
     print("Running graph speculative decoding...")
     _sync_cuda()
     spec_start = time.perf_counter()
@@ -254,6 +250,17 @@ def main() -> None:
         f"({spec_result.num_accepted} accepted / "
         f"{spec_result.num_accepted + spec_result.num_rejected} proposed)"
     )
+
+    if spec_result.position_proposal_counts:
+        print("\n  Position-based acceptance rates:")
+        max_position = max(spec_result.position_proposal_counts.keys())
+        for pos in range(max_position + 1):
+            proposals = spec_result.position_proposal_counts.get(pos, 0)
+            acceptances = spec_result.position_acceptance_counts.get(pos, 0)
+            if proposals > 0:
+                pos_rate = acceptances / proposals
+                print(f"    Position {pos}: {acceptances}/{proposals} ({pos_rate:.2%})")
+
     print(f"  Output: {spec_result.text}")
 
 

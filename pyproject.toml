@@ -14,7 +14,13 @@ dependencies = [
     "pydantic-settings>=2.11.0",
     "pyvis>=0.3.2",
     "accelerate>=1.10.1",
+    "datasets>=4.2.0",
+    "tqdm>=4.67.1",
 ]
+
+[project.scripts]
+check-docstrings = "scripts.check_no_docstrings:main"
+check-comments = "scripts.check_comments:main"
 
 [project.optional-dependencies]
 dev = [
@@ -39,7 +45,7 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/speculant_graph"]
+packages = ["src/speculant_graph", "scripts"]
 
 [tool.ruff]
 # Ignore docstring and comment length rules

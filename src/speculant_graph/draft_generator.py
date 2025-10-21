@@ -75,14 +75,12 @@ class DraftGenerator:
 
         while len(draft_tokens) < k:
             if self.config.attentive_mix:
-                # Use attentive mixing of multiple orders
                 q_mix = self._mix_contexts(current_context)
 
                 if not q_mix:
                     logger.debug("No matching context, stopping draft")
                     break
 
-                # Sample or greedy from mixture
                 if strategy == "greedy":
                     next_tok = max(q_mix, key=q_mix.get)
                     next_prob = 1.0
@@ -102,7 +100,6 @@ class DraftGenerator:
                 logger.debug(f"Drafted (attentive): '{tok_text}'")
 
             else:
-                # Original: single highest order
                 matched_order, context_tuple = self._find_highest_order_match(
                     current_context
                 )
@@ -255,15 +252,10 @@ class DraftGenerator:
         return draft, probs, contexts, successors_list, weights_list
 
     def get_most_frequent_token(self) -> int:
-        """
-        Returns the token with the highest count from the graph.
-        Used as a fallback for empty prompts.
-        """
         max_count = 0
         most_frequent = 0
 
         for node in self.graph.nodes():
-            # Only check token nodes (int)
             if isinstance(node, int):
                 node_data = self.graph.nodes[node]
                 count = node_data.get("count", 0)
@@ -275,7 +267,6 @@ class DraftGenerator:
         return most_frequent
 
     def _get_context_stats(self, ctx: tuple[int, ...]) -> tuple[dict[int, float], int]:
-        """Get successor dist and total count in single pass."""
         dist = {}
         total_count = 0
         for _, tok, attr in self.graph.out_edges(ctx, data=True):
@@ -284,17 +275,11 @@ class DraftGenerator:
         return dist, total_count
 
     def _compute_context_entropy(self, dist: dict[int, float]) -> float:
-        """Compute Shannon entropy of successor distribution."""
         return -sum(p * math.log(p) for p in dist.values() if p > 0)
 
     def _mix_contexts(self, context: list[int]) -> dict[int, float]:
-        """
-        Mix multiple order contexts with attention weights.
-        Returns q_mix = Σ attention_j * P_j(·)
-        """
         orders, contexts = [], []
 
-        # Collect matching contexts
         for o in range(self.max_order, 0, -1):
             if len(context) < o:
                 continue
@@ -306,7 +291,6 @@ class DraftGenerator:
         if not contexts:
             return {}
 
-        # Cache dist/count/entropy, compute scores, guard zero-mass
         beta = self.config.order_bias
         alpha = self.config.entropy_penalty
         tau = self.config.mix_temperature
@@ -333,13 +317,11 @@ class DraftGenerator:
         if not scores:
             return {}  # bail if all contexts invalid
 
-        # Softmax
         max_score = max(scores)
         exps = [math.exp(s - max_score) for s in scores]
         Z = sum(exps)
         attn_weights = [e / Z for e in exps]
 
-        # Log AFTER weights computed
         logger.debug(f"Mixing {len(context_data)} orders:")
         for (o, _, _, count, entropy, score), weight in zip(context_data, attn_weights):
             logger.debug(
@@ -347,13 +329,11 @@ class DraftGenerator:
                 f"score={score:.2f}, w={weight:.3f}"
             )
 
-        # Mix using cached distributions (no re-fetch)
         q_mix = defaultdict(float)
         for (_, _, P_j, _, _, _), a in zip(context_data, attn_weights):
             for tok, prob in P_j.items():
                 q_mix[tok] += a * prob
 
-        # Normalize
         Z_q = sum(q_mix.values())
         if Z_q > 0:
             for tok in list(q_mix.keys()):

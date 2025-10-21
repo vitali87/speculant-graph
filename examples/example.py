@@ -37,7 +37,6 @@ def main():
         logger.info(f"Using existing graph: {graph_path}")
 
     verifier_config = VerifierConfig()
-    # Note: attentive_mix=True by default for robust context mixing
     draft_config = DraftConfig(k=8, strategy="greedy")
 
     decoder = SpeculativeDecoder(

@@ -6,6 +6,7 @@ from typing import Literal
 import networkx as nx
 from transformers import AutoTokenizer
 from loguru import logger
+from tqdm import tqdm
 
 from speculant_graph.download_utils import configure_download_mode
 
@@ -23,7 +24,11 @@ class GraphBuilder:
         self.max_order = max_order
 
         configure_download_mode(download_mode)
-        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, token=hf_token)
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            tokenizer_name,
+            token=hf_token,
+            model_max_length=None,  # Suppress max length warnings
+        )
         self.chunk_size = chunk_size
         self.graph = nx.DiGraph()
         self.token_counts: dict[int, int] = {}
@@ -71,7 +76,9 @@ class GraphBuilder:
             all_token_ids.append(self.tokenizer.eos_token_id)
             logger.debug(f"Added EOS token: {self.tokenizer.eos_token_id}")
 
-        logger.debug(f"Tokenized {len(all_token_ids)} tokens from {file_path}")
+        logger.info(
+            f"Tokenized {len(all_token_ids):,} tokens from {Path(file_path).name}"
+        )
 
         combined_tokens = prev_context + all_token_ids
 
@@ -79,25 +86,35 @@ class GraphBuilder:
             self.token_counts[token_id] = self.token_counts.get(token_id, 0) + 1
 
         chunk_overlap = self.max_order - 1
-        for chunk_start in range(0, len(combined_tokens), self.chunk_size):
-            chunk_end = min(
-                chunk_start + self.chunk_size + chunk_overlap, len(combined_tokens)
-            )
-            chunk_tokens = combined_tokens[chunk_start:chunk_end]
+        num_chunks = (len(combined_tokens) + self.chunk_size - 1) // self.chunk_size
 
-            for order in range(1, self.max_order + 1):
-                for i in range(len(chunk_tokens) - order):
-                    context = tuple(chunk_tokens[i : i + order])
-                    next_token = chunk_tokens[i + order]
+        with tqdm(
+            total=num_chunks,
+            desc="  Processing chunks",
+            unit="chunk",
+            leave=False,
+        ) as pbar:
+            for chunk_start in range(0, len(combined_tokens), self.chunk_size):
+                chunk_end = min(
+                    chunk_start + self.chunk_size + chunk_overlap, len(combined_tokens)
+                )
+                chunk_tokens = combined_tokens[chunk_start:chunk_end]
 
-                    if context not in self.ngram_transition_counts:
-                        self.ngram_transition_counts[context] = {}
+                for order in range(1, self.max_order + 1):
+                    for i in range(len(chunk_tokens) - order):
+                        context = tuple(chunk_tokens[i : i + order])
+                        next_token = chunk_tokens[i + order]
 
-                    self.ngram_transition_counts[context][next_token] = (
-                        self.ngram_transition_counts[context].get(next_token, 0) + 1
-                    )
+                        if context not in self.ngram_transition_counts:
+                            self.ngram_transition_counts[context] = {}
 
-                    self.context_index[context] = order
+                        self.ngram_transition_counts[context][next_token] = (
+                            self.ngram_transition_counts[context].get(next_token, 0) + 1
+                        )
+
+                        self.context_index[context] = order
+
+                pbar.update(1)
 
         return (
             all_token_ids[-(self.max_order - 1) :]
@@ -106,6 +123,7 @@ class GraphBuilder:
         )
 
     def _calculate_probabilities(self) -> None:
+        logger.info(f"Adding {len(self.token_counts)} token nodes...")
         for token_id, count in self.token_counts.items():
             token_text = self.tokenizer.decode([token_id])
             self.graph.add_node(
@@ -116,18 +134,30 @@ class GraphBuilder:
             f"Processing {len(self.ngram_transition_counts)} n-gram contexts..."
         )
 
-        for context, next_token_counts in self.ngram_transition_counts.items():
-            total_count = sum(next_token_counts.values())
+        with tqdm(
+            total=len(self.ngram_transition_counts),
+            desc="Building graph edges",
+            unit="contexts",
+            unit_scale=True,
+        ) as pbar:
+            for context, next_token_counts in self.ngram_transition_counts.items():
+                total_count = sum(next_token_counts.values())
 
-            for next_token, count in next_token_counts.items():
-                probability = count / total_count
-                order = len(context)
+                for next_token, count in next_token_counts.items():
+                    probability = count / total_count
+                    order = len(context)
 
-                self.graph.add_edge(
-                    context, next_token, weight=probability, count=count, order=order
-                )
+                    self.graph.add_edge(
+                        context,
+                        next_token,
+                        weight=probability,
+                        count=count,
+                        order=order,
+                    )
 
-        logger.debug(
+                pbar.update(1)
+
+        logger.info(
             f"Built context index with {len(self.context_index)} unique n-grams"
         )
 

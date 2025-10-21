@@ -16,6 +16,8 @@ class GenerationResult(BaseModel):
     num_accepted: int
     num_rejected: int
     total_tokens: int
+    position_acceptance_counts: dict[int, int]  # Maps position to acceptance count
+    position_proposal_counts: dict[int, int]  # Maps position to proposal count
 
 
 class SpeculativeDecoder:
@@ -30,7 +32,6 @@ class SpeculativeDecoder:
 
         configure_download_mode(verifier_config.download_mode)
 
-        # Parse torch_dtype
         dtype_map = {
             "float16": torch.float16,
             "bfloat16": torch.bfloat16,
@@ -62,7 +63,6 @@ class SpeculativeDecoder:
             verifier_config.model_name, token=verifier_config.hf_token
         )
 
-        # Determine device - if device_map is used, don't manually move the model
         if verifier_config.device_map:
             self.device = next(self.model.parameters()).device
             logger.info(f"Model loaded with device_map: {verifier_config.device_map}")
@@ -105,29 +105,24 @@ class SpeculativeDecoder:
         enc = self.tokenizer(prompt, add_special_tokens=False, return_tensors="pt")
         input_ids = enc["input_ids"].to(self.device)
 
-        # Handle empty prompt edge case with robust fallback order
         if len(input_ids[0]) == 0:
             starter_token = None
 
-            # Try BOS token first
             if self.tokenizer.bos_token_id is not None:
                 starter_token = self.tokenizer.bos_token_id
                 logger.debug(
                     f"Empty prompt detected, injecting BOS token: {starter_token}"
                 )
-            # Try EOS token
             elif self.tokenizer.eos_token_id is not None:
                 starter_token = self.tokenizer.eos_token_id
                 logger.debug(
                     f"Empty prompt detected, no BOS, injecting EOS token: {starter_token}"
                 )
-            # Try PAD token
             elif self.tokenizer.pad_token_id is not None:
                 starter_token = self.tokenizer.pad_token_id
                 logger.debug(
                     f"Empty prompt detected, no BOS/EOS, injecting PAD token: {starter_token}"
                 )
-            # Fallback: use most frequent token from graph
             else:
                 starter_token = self.draft_generator.get_most_frequent_token()
                 logger.debug(
@@ -145,6 +140,10 @@ class SpeculativeDecoder:
         num_draft_accepted = 0
         num_draft_rejected = 0
         num_verifier_generated = 0
+        position_acceptance_counts: dict[
+            int, int
+        ] = {}  # Track acceptances per position
+        position_proposal_counts: dict[int, int] = {}  # Track proposals per position
 
         while len(generated_tokens) - prompt_length < generation_config.max_tokens:
             current_text = self.tokenizer.decode(
@@ -171,21 +170,32 @@ class SpeculativeDecoder:
                 generated_tokens.extend(new_tokens)
                 continue
 
-            accepted_count, rejected_count, accepted_tokens, has_correction = (
-                self._verify_draft(
-                    generated_tokens,
-                    draft_result.token_ids,
-                    draft_result.token_probs,
-                    draft_result.matched_contexts,
-                    draft_result.successors,
-                    draft_result.successor_weights,
-                    draft_result.strategy,
-                    temperature=generation_config.temperature,
-                )
+            (
+                accepted_count,
+                rejected_count,
+                accepted_tokens,
+                has_correction,
+                accepted_positions,
+            ) = self._verify_draft(
+                generated_tokens,
+                draft_result.token_ids,
+                draft_result.token_probs,
+                draft_result.matched_contexts,
+                draft_result.successors,
+                draft_result.successor_weights,
+                draft_result.strategy,
+                temperature=generation_config.temperature,
             )
 
             num_draft_accepted += accepted_count
             num_draft_rejected += rejected_count
+
+            for i in range(len(draft_result.token_ids)):
+                position_proposal_counts[i] = position_proposal_counts.get(i, 0) + 1
+            for pos in accepted_positions:
+                position_acceptance_counts[pos] = (
+                    position_acceptance_counts.get(pos, 0) + 1
+                )
 
             if accepted_count > 0:
                 accepted_draft = draft_result.token_ids[:accepted_count]
@@ -212,7 +222,6 @@ class SpeculativeDecoder:
                     f"→ Sampled correction '{corrected_text}' (ID: {corrected_token}) from adjusted distribution"
                 )
             elif accepted_count == 0:
-                # All tokens rejected, no correction was made yet
                 rejected_text = self.tokenizer.decode(
                     draft_result.token_ids, skip_special_tokens=True
                 )
@@ -237,7 +246,6 @@ class SpeculativeDecoder:
                 num_verifier_generated += verifier_count
                 generated_tokens.extend(fallback_tokens)
 
-        # Return only the continuation (exclude prompt)
         final_text = self.tokenizer.decode(
             generated_tokens[prompt_length:], skip_special_tokens=True
         )
@@ -258,6 +266,18 @@ class SpeculativeDecoder:
             f"Breakdown: {num_draft_accepted} draft accepted, {num_draft_rejected} draft rejected, {num_verifier_generated} verifier generated"
         )
 
+        if position_proposal_counts:
+            logger.info("Position-based acceptance statistics:")
+            max_position = max(position_proposal_counts.keys())
+            for pos in range(max_position + 1):
+                proposals = position_proposal_counts.get(pos, 0)
+                acceptances = position_acceptance_counts.get(pos, 0)
+                if proposals > 0:
+                    pos_rate = acceptances / proposals
+                    logger.info(
+                        f"  Position {pos}: {acceptances}/{proposals} ({pos_rate:.2%})"
+                    )
+
         return GenerationResult(
             text=final_text,
             token_ids=generated_tokens[prompt_length:],
@@ -265,6 +285,8 @@ class SpeculativeDecoder:
             num_accepted=num_draft_accepted,
             num_rejected=num_draft_rejected,
             total_tokens=len(generated_tokens) - prompt_length,
+            position_acceptance_counts=position_acceptance_counts,
+            position_proposal_counts=position_proposal_counts,
         )
 
     def _reset_verifier_cache(self) -> None:
@@ -327,11 +349,12 @@ class SpeculativeDecoder:
         successor_weights: list[list[float]],
         strategy: str,
         temperature: float,
-    ) -> tuple[int, int, list[int], bool]:
+    ) -> tuple[int, int, list[int], bool, list[int]]:
         if self.last_logits is None:
             raise RuntimeError("Verifier cache not initialized")
 
         accepted_tokens = []
+        accepted_positions = []  # Track which positions were accepted
         num_actually_accepted = 0
         has_correction = False
 
@@ -350,6 +373,7 @@ class SpeculativeDecoder:
 
             if random.random() < acceptance_prob:
                 accepted_tokens.append(draft_token)
+                accepted_positions.append(i)  # Record the position
                 num_actually_accepted += 1
                 self._append_token(draft_token)
                 continue
@@ -382,7 +406,13 @@ class SpeculativeDecoder:
             break
 
         rejected_count = len(draft_tokens) - num_actually_accepted
-        return num_actually_accepted, rejected_count, accepted_tokens, has_correction
+        return (
+            num_actually_accepted,
+            rejected_count,
+            accepted_tokens,
+            has_correction,
+            accepted_positions,
+        )
 
     def _generate_from_verifier(
         self, count: int, temperature: float
