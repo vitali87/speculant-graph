@@ -1,3 +1,21 @@
+<p align="center">
+  <img src="assets/speculant-graph-logo-mark.svg#gh-light-mode-only" alt="Speculant Graph Logo" width="300" />
+  <img src="assets/speculant-graph-logo-mark-dark.svg#gh-dark-mode-only" alt="Speculant Graph Logo" width="300" />
+</p>
+
+<h1 align="center">Speculant Graph</h1>
+<h3 align="center">Graph drafts, LLM verifies</h3>
+
+<p align="center">
+  <a href="https://github.com/vitali87/speculant-graph/stargazers"><img src="https://img.shields.io/github/stars/vitali87/speculant-graph?style=social" alt="GitHub stars"></a>
+  <a href="https://github.com/vitali87/speculant-graph/network/members"><img src="https://img.shields.io/github/forks/vitali87/speculant-graph?style=social" alt="GitHub forks"></a>
+  <a href="https://github.com/vitali87/speculant-graph/watchers"><img src="https://img.shields.io/github/watchers/vitali87/speculant-graph?style=social" alt="GitHub watchers"></a>
+  <a href="https://github.com/vitali87/speculant-graph/issues"><img src="https://img.shields.io/github/issues/vitali87/speculant-graph" alt="GitHub issues"></a>
+  <a href="https://github.com/vitali87/speculant-graph/blob/main/LICENSE"><img src="https://img.shields.io/github/license/vitali87/speculant-graph" alt="License"></a>
+  <img src="https://img.shields.io/github/languages/top/vitali87/speculant-graph" alt="Top language">
+  <img src="https://img.shields.io/github/last-commit/vitali87/speculant-graph" alt="Last commit">
+</p>
+
 # Speculative Graph Decoding
 
 Novel approach to speculative decoding using multi-order n-gram graphs as draft models instead of small LLMs.

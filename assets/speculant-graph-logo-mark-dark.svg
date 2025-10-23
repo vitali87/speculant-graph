@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="512" viewBox="54 42 148 172" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Speculant Graph — mark (dark)</title>
+  <desc id="desc">A minimal network of nodes and edges with a bold verification check, symbolizing "graph drafts, LLM verifies".</desc>
+
+  <!-- soft background shape for subtle presence -->
+  <circle cx="128" cy="128" r="118" fill="none" stroke="#FFFFFF" stroke-opacity="0.14" stroke-width="2" />
+
+  <!-- edges (light) -->
+  <g stroke="#FFFFFF" stroke-opacity="0.14" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <!-- ring connections (hexagon) -->
+    <path d="M128 52 L192 84 L192 172 L128 204 L64 172 L64 84 Z" />
+    <!-- spokes to center -->
+    <path d="M128 52 L128 128 M192 84 L128 128 M192 172 L128 128 M128 204 L128 128 M64 172 L128 128 M64 84 L128 128" />
+  </g>
+
+  <!-- nodes -->
+  <g stroke="none">
+    <!-- center node -->
+    <circle cx="128" cy="128" r="6.5" fill="#FFFFFF" fill-opacity="0.92"/>
+    <!-- ring nodes -->
+    <circle cx="128" cy="52" r="5.5" fill="#FFFFFF" fill-opacity="0.7"/>
+    <circle cx="192" cy="84" r="5.5" fill="#FFFFFF" fill-opacity="0.7"/>
+    <circle cx="192" cy="172" r="5.5" fill="#FFFFFF" fill-opacity="0.7"/>
+    <circle cx="128" cy="204" r="5.5" fill="#FFFFFF" fill-opacity="0.7"/>
+    <circle cx="64" cy="172" r="5.5" fill="#FFFFFF" fill-opacity="0.7"/>
+    <circle cx="64" cy="84" r="5.5" fill="#FFFFFF" fill-opacity="0.7"/>
+  </g>
+
+  <!-- highlighted speculative path (subtle) -->
+  <path d="M72 92 C96 84, 120 92, 128 112 C136 136, 160 144, 184 140" stroke="#FFFFFF" stroke-opacity="0.18" stroke-width="8" fill="none" stroke-linecap="round" />
+
+  <!-- verifier check -->
+  <path d="M84 142 L116 174 L176 106" stroke="#2EE6C4" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- small accent dot (accepted node) -->
+  <circle cx="176" cy="106" r="5.5" fill="#2EE6C4"/>
+</svg>
