@@ -1,11 +1,14 @@
 import math
 import random
 from collections import defaultdict
-from typing import Self, Literal
+from typing import Self, Literal, TYPE_CHECKING
 
 import networkx as nx
 from pydantic import BaseModel
 from transformers import AutoTokenizer
+
+if TYPE_CHECKING:
+    from transformers import PreTrainedTokenizer
 from loguru import logger
 
 from speculant_graph.config import DraftConfig
@@ -35,14 +38,23 @@ class DraftGenerator:
         tokenizer_name: str = "openai/gpt-oss-20b",
         hf_token: str | None = None,
         download_mode: Literal["auto", "hf_transfer", "default"] = "auto",
+        tokenizer: "PreTrainedTokenizer | None" = None,
     ):
         self.graph = graph
         self.context_index = context_index
         self.max_order = max_order
         self.config = config or DraftConfig()
 
-        configure_download_mode(download_mode)
-        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, token=hf_token)
+        if tokenizer is not None:
+            self.tokenizer = tokenizer
+            logger.debug("Using provided tokenizer for draft generator")
+        else:
+            configure_download_mode(download_mode)
+            logger.info(f"Loading tokenizer for draft generator: {tokenizer_name}")
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                tokenizer_name, token=hf_token
+            )
+            logger.info("Tokenizer loaded successfully")
 
     def generate(self, prompt: str, k: int, strategy: str = "greedy") -> DraftResult:
         token_ids = self.tokenizer.encode(prompt, add_special_tokens=False)
@@ -349,6 +361,7 @@ class DraftGenerator:
         hf_token: str | None = None,
         download_mode: Literal["auto", "hf_transfer", "default"] = "auto",
         config: DraftConfig | None = None,
+        tokenizer: "PreTrainedTokenizer | None" = None,
     ) -> Self:
         from speculant_graph.graph_builder import GraphBuilder
 
@@ -366,4 +379,5 @@ class DraftGenerator:
             tokenizer_name=tokenizer_name,
             hf_token=hf_token,
             download_mode=download_mode,
+            tokenizer=tokenizer,
         )

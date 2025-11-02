@@ -16,6 +16,12 @@
   <img src="https://img.shields.io/github/last-commit/vitali87/speculant-graph" alt="Last commit">
 </p>
 
+<p align="center">
+  <video src="https://github.com/vitali87/speculant-graph/raw/main/assets/ai_spec_2_final.mov" autoplay loop muted playsinline controls width="100%" max-width="800px">
+    Your browser does not support the video tag.
+  </video>
+</p>
+
 # Speculative Graph Decoding
 
 Novel approach to speculative decoding using multi-order n-gram graphs as draft models instead of small LLMs.

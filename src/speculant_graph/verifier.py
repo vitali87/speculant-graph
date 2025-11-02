@@ -80,6 +80,7 @@ class SpeculativeDecoder:
             verifier_config.hf_token,
             verifier_config.download_mode,
             draft_config,
+            tokenizer=self.tokenizer,
         )
         logger.info("N-gram graph loaded successfully")
         self._reset_verifier_cache()
@@ -102,35 +103,7 @@ class SpeculativeDecoder:
             f"seed={generation_config.seed}"
         )
 
-        enc = self.tokenizer(prompt, add_special_tokens=False, return_tensors="pt")
-        input_ids = enc["input_ids"].to(self.device)
-
-        if len(input_ids[0]) == 0:
-            starter_token = None
-
-            if self.tokenizer.bos_token_id is not None:
-                starter_token = self.tokenizer.bos_token_id
-                logger.debug(
-                    f"Empty prompt detected, injecting BOS token: {starter_token}"
-                )
-            elif self.tokenizer.eos_token_id is not None:
-                starter_token = self.tokenizer.eos_token_id
-                logger.debug(
-                    f"Empty prompt detected, no BOS, injecting EOS token: {starter_token}"
-                )
-            elif self.tokenizer.pad_token_id is not None:
-                starter_token = self.tokenizer.pad_token_id
-                logger.debug(
-                    f"Empty prompt detected, no BOS/EOS, injecting PAD token: {starter_token}"
-                )
-            else:
-                starter_token = self.draft_generator.get_most_frequent_token()
-                logger.debug(
-                    f"Empty prompt detected, no special tokens, injecting most frequent graph token: {starter_token}"
-                )
-
-            input_ids = torch.tensor([[starter_token]], device=self.device)
-
+        input_ids = self._prepare_input_ids(prompt)
         self._reset_verifier_cache()
         self._prime_verifier_state(input_ids)
 
@@ -288,6 +261,132 @@ class SpeculativeDecoder:
             position_acceptance_counts=position_acceptance_counts,
             position_proposal_counts=position_proposal_counts,
         )
+
+    def _prepare_input_ids(self, prompt: str) -> torch.Tensor:
+        enc = self.tokenizer(prompt, add_special_tokens=False, return_tensors="pt")
+        input_ids = enc["input_ids"].to(self.device)
+        if len(input_ids[0]) == 0:
+            starter_token = None
+            if self.tokenizer.bos_token_id is not None:
+                starter_token = self.tokenizer.bos_token_id
+            elif self.tokenizer.eos_token_id is not None:
+                starter_token = self.tokenizer.eos_token_id
+            elif self.tokenizer.pad_token_id is not None:
+                starter_token = self.tokenizer.pad_token_id
+            else:
+                starter_token = self.draft_generator.get_most_frequent_token()
+            input_ids = torch.tensor([[starter_token]], device=self.device)
+        return input_ids
+
+    def generate_stream(self, prompt: str, generation_config: GenerationConfig):
+        if generation_config.seed is not None:
+            random.seed(generation_config.seed)
+            torch.manual_seed(generation_config.seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(generation_config.seed)
+
+        input_ids = self._prepare_input_ids(prompt)
+        self._reset_verifier_cache()
+        self._prime_verifier_state(input_ids)
+        generated_tokens = input_ids[0].tolist()
+        prompt_length = len(input_ids[0])
+        num_draft_accepted = 0
+        num_draft_rejected = 0
+        num_verifier_generated = 0
+        position_acceptance_counts: dict[int, int] = {}
+        position_proposal_counts: dict[int, int] = {}
+
+        while len(generated_tokens) - prompt_length < generation_config.max_tokens:
+            current_text = self.tokenizer.decode(
+                generated_tokens, skip_special_tokens=True
+            )
+            tokens_remaining = generation_config.max_tokens - (
+                len(generated_tokens) - prompt_length
+            )
+            draft_k = min(self.draft_config.k, tokens_remaining)
+            draft_result = self.draft_generator.generate(
+                prompt=current_text, k=draft_k, strategy=self.draft_config.strategy
+            )
+
+            if len(draft_result.token_ids) == 0:
+                verifier_count, new_tokens = self._generate_from_verifier(
+                    count=1, temperature=generation_config.temperature
+                )
+                num_verifier_generated += verifier_count
+                for token in new_tokens:
+                    generated_tokens.append(token)
+                    yield (
+                        self.tokenizer.decode([token], skip_special_tokens=True),
+                        generated_tokens[prompt_length:],
+                    )
+                continue
+
+            (
+                accepted_count,
+                rejected_count,
+                accepted_tokens,
+                has_correction,
+                accepted_positions,
+            ) = self._verify_draft(
+                generated_tokens,
+                draft_result.token_ids,
+                draft_result.token_probs,
+                draft_result.matched_contexts,
+                draft_result.successors,
+                draft_result.successor_weights,
+                draft_result.strategy,
+                temperature=generation_config.temperature,
+            )
+
+            num_draft_accepted += accepted_count
+            num_draft_rejected += rejected_count
+            for i in range(len(draft_result.token_ids)):
+                position_proposal_counts[i] = position_proposal_counts.get(i, 0) + 1
+            for pos in accepted_positions:
+                position_acceptance_counts[pos] = (
+                    position_acceptance_counts.get(pos, 0) + 1
+                )
+
+            for token in accepted_tokens:
+                generated_tokens.append(token)
+                yield (
+                    self.tokenizer.decode([token], skip_special_tokens=True),
+                    generated_tokens[prompt_length:],
+                )
+
+            if accepted_count == 0 and not has_correction:
+                verifier_count, fallback_tokens = self._generate_from_verifier(
+                    count=1, temperature=generation_config.temperature
+                )
+                num_verifier_generated += verifier_count
+                for token in fallback_tokens:
+                    generated_tokens.append(token)
+                    yield (
+                        self.tokenizer.decode([token], skip_special_tokens=True),
+                        generated_tokens[prompt_length:],
+                    )
+
+        final_text = self.tokenizer.decode(
+            generated_tokens[prompt_length:], skip_special_tokens=True
+        )
+        total_draft_proposed = num_draft_accepted + num_draft_rejected
+        acceptance_rate = (
+            num_draft_accepted / total_draft_proposed
+            if total_draft_proposed > 0
+            else 0.0
+        )
+
+        result = GenerationResult(
+            text=final_text,
+            token_ids=generated_tokens[prompt_length:],
+            acceptance_rate=acceptance_rate,
+            num_accepted=num_draft_accepted,
+            num_rejected=num_draft_rejected,
+            total_tokens=len(generated_tokens) - prompt_length,
+            position_acceptance_counts=position_acceptance_counts,
+            position_proposal_counts=position_proposal_counts,
+        )
+        yield result
 
     def _reset_verifier_cache(self) -> None:
         self.past_key_values = None
