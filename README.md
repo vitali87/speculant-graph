@@ -16,7 +16,9 @@
   <img src="https://img.shields.io/github/last-commit/vitali87/speculant-graph" alt="Last commit">
 </p>
 
-https://github.com/user-attachments/assets/bcdd8a15-d242-4f07-b733-da7a446a8370
+<div align="center">
+  <video src="https://github.com/user-attachments/assets/bcdd8a15-d242-4f07-b733-da7a446a8370" width="600" controls></video>
+</div>
 
 # Speculative Graph Decoding
 
