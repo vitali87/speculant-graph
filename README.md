@@ -17,7 +17,7 @@
 </p>
 
 <div align="center">
-  <video src="https://github.com/user-attachments/assets/bcdd8a15-d242-4f07-b733-da7a446a8370" width="600" controls></video>
+  <video src="https://github.com/user-attachments/assets/10b4164d-6ee0-44af-aac2-b09745698692" width="600" controls></video>
 </div>
 
 # Speculative Graph Decoding
