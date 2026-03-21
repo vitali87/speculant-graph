@@ -1,12 +1,11 @@
 import os
-import tempfile
 
 import networkx as nx
 import pytest
 
 from speculant_graph.graph_builder import GraphBuilder
 
-from conftest import TOKENIZER_NAME, SAMPLE_CORPUS, SAMPLE_CORPUS_2
+from conftest import TOKENIZER_NAME
 
 
 class TestGraphBuilderInit:
@@ -163,9 +162,7 @@ class TestSaveAndLoad:
         filepath = str(tmp_path / "graph.pkl")
         builder.save(filepath)
 
-        graph, metadata = GraphBuilder.load(
-            filepath, validate_tokenizer=False
-        )
+        graph, metadata = GraphBuilder.load(filepath, validate_tokenizer=False)
 
         assert isinstance(graph, nx.DiGraph)
         assert isinstance(metadata, dict)
@@ -185,9 +182,7 @@ class TestSaveAndLoad:
         filepath = str(tmp_path / "graph.pkl")
         builder.save(filepath)
 
-        loaded_graph, metadata = GraphBuilder.load(
-            filepath, validate_tokenizer=False
-        )
+        loaded_graph, metadata = GraphBuilder.load(filepath, validate_tokenizer=False)
 
         assert loaded_graph.number_of_nodes() == original_graph.number_of_nodes()
         assert loaded_graph.number_of_edges() == original_graph.number_of_edges()
