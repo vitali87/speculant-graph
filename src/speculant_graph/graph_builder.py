@@ -123,12 +123,12 @@ class GraphBuilder:
 
                 # Split at last whitespace to avoid cutting words
                 last_ws = text.rfind(" ")
-                if last_ws == -1:
-                    chunk_text = text
-                    leftover = ""
-                else:
+                if last_ws > 0:
                     chunk_text = text[:last_ws]
                     leftover = text[last_ws:]
+                else:
+                    chunk_text = text
+                    leftover = ""
 
                 token_ids = self.tokenizer.encode(
                     chunk_text, add_special_tokens=False
