@@ -10,6 +10,21 @@ from tqdm import tqdm
 
 from speculant_graph.download_utils import configure_download_mode
 
+_ALLOWED_PICKLE_MODULES = frozenset({
+    "networkx.classes.digraph",
+    "networkx.classes.coreviews",
+    "networkx.classes.reportviews",
+})
+
+
+class _RestrictedUnpickler(pickle.Unpickler):
+    def find_class(self, module: str, name: str) -> type:
+        if module in _ALLOWED_PICKLE_MODULES:
+            return super().find_class(module, name)
+        raise pickle.UnpicklingError(
+            f"Refusing to unpickle disallowed class: {module}.{name}"
+        )
+
 
 class GraphBuilder:
     def __init__(
@@ -207,7 +222,7 @@ class GraphBuilder:
         expected_tokenizer: str | None = None,
     ) -> tuple:
         with open(filepath, "rb") as f:
-            metadata = pickle.load(f)
+            metadata = _RestrictedUnpickler(f).load()
 
         graph = metadata["graph"]
         saved_tokenizer = metadata.get("tokenizer_name", "unknown")
