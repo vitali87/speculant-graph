@@ -63,15 +63,9 @@ class TestRestrictedUnpickler:
 
 def _build_exploit_pickle(func, arg):
     """Build a malicious pickle payload that calls func(arg)."""
-    import pickletools
-
-    # Use pickle protocol to craft a payload that calls func(arg)
     buf = io.BytesIO()
-    # We craft it by pickling a wrapper that reduces to func(arg)
     pickler = pickle.Pickler(buf, protocol=pickle.HIGHEST_PROTOCOL)
-    pickler.dump(
-        _ExploitHelper(func, arg)
-    )
+    pickler.dump(_ExploitHelper(func, arg))
     return buf.getvalue()
 
 

@@ -10,11 +10,11 @@ from tqdm import tqdm
 
 from speculant_graph.download_utils import configure_download_mode
 
-_ALLOWED_PICKLE_MODULES = {
+_ALLOWED_PICKLE_MODULES = frozenset({
     "networkx.classes.digraph",
     "networkx.classes.coreviews",
     "networkx.classes.reportviews",
-}
+})
 
 
 class _RestrictedUnpickler(pickle.Unpickler):
