@@ -162,9 +162,7 @@ class TestSaveAndLoad:
         filepath = str(tmp_path / "graph.pkl")
         builder.save(filepath)
 
-        graph, metadata = GraphBuilder.load(
-            filepath, validate_tokenizer=False
-        )
+        graph, metadata = GraphBuilder.load(filepath, validate_tokenizer=False)
 
         assert isinstance(graph, nx.DiGraph)
         assert isinstance(metadata, dict)
@@ -184,9 +182,7 @@ class TestSaveAndLoad:
         filepath = str(tmp_path / "graph.pkl")
         builder.save(filepath)
 
-        loaded_graph, metadata = GraphBuilder.load(
-            filepath, validate_tokenizer=False
-        )
+        loaded_graph, metadata = GraphBuilder.load(filepath, validate_tokenizer=False)
 
         assert loaded_graph.number_of_nodes() == original_graph.number_of_nodes()
         assert loaded_graph.number_of_edges() == original_graph.number_of_edges()

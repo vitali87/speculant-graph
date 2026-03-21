@@ -10,11 +10,13 @@ from tqdm import tqdm
 
 from speculant_graph.download_utils import configure_download_mode
 
-_ALLOWED_PICKLE_MODULES = frozenset({
-    "networkx.classes.digraph",
-    "networkx.classes.coreviews",
-    "networkx.classes.reportviews",
-})
+_ALLOWED_PICKLE_MODULES = frozenset(
+    {
+        "networkx.classes.digraph",
+        "networkx.classes.coreviews",
+        "networkx.classes.reportviews",
+    }
+)
 
 
 class _RestrictedUnpickler(pickle.Unpickler):
@@ -88,13 +90,16 @@ class GraphBuilder:
         total_token_count = 0
         carry_over = prev_context.copy()
 
-        with open(path, "r", encoding="utf-8") as f, tqdm(
-            total=file_size,
-            desc=f"  Reading {path.name}",
-            unit="B",
-            unit_scale=True,
-            leave=False,
-        ) as pbar:
+        with (
+            open(path, "r", encoding="utf-8") as f,
+            tqdm(
+                total=file_size,
+                desc=f"  Reading {path.name}",
+                unit="B",
+                unit_scale=True,
+                leave=False,
+            ) as pbar,
+        ):
             leftover = ""
             while True:
                 raw = f.read(self._READ_CHUNK_CHARS)
@@ -107,9 +112,7 @@ class GraphBuilder:
 
                     if is_last_file and self.tokenizer.eos_token_id is not None:
                         final_token_ids.append(self.tokenizer.eos_token_id)
-                        logger.debug(
-                            f"Added EOS token: {self.tokenizer.eos_token_id}"
-                        )
+                        logger.debug(f"Added EOS token: {self.tokenizer.eos_token_id}")
 
                     if final_token_ids:
                         carry_over = self._process_token_chunk(
@@ -130,15 +133,11 @@ class GraphBuilder:
                     chunk_text = text
                     leftover = ""
 
-                token_ids = self.tokenizer.encode(
-                    chunk_text, add_special_tokens=False
-                )
+                token_ids = self.tokenizer.encode(chunk_text, add_special_tokens=False)
                 carry_over = self._process_token_chunk(token_ids, carry_over)
                 total_token_count += len(token_ids)
 
-        logger.info(
-            f"Tokenized {total_token_count:,} tokens from {path.name}"
-        )
+        logger.info(f"Tokenized {total_token_count:,} tokens from {path.name}")
 
         return (
             carry_over[-(self.max_order - 1) :]

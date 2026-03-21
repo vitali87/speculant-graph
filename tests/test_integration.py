@@ -1,4 +1,3 @@
-
 import pytest
 
 from speculant_graph.config import DraftConfig
@@ -331,9 +330,7 @@ class TestEdgeCases:
 
     def test_chunk_size_one(self, corpus_file, tokenizer):
         """Test graph building with very small chunk size."""
-        builder = GraphBuilder(
-            tokenizer_name=TOKENIZER_NAME, max_order=2, chunk_size=1
-        )
+        builder = GraphBuilder(tokenizer_name=TOKENIZER_NAME, max_order=2, chunk_size=1)
         graph = builder.build_from_files([corpus_file])
         assert graph.number_of_nodes() > 0
         assert graph.number_of_edges() > 0

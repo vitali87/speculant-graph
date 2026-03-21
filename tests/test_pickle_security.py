@@ -11,9 +11,7 @@ from conftest import TOKENIZER_NAME
 
 class TestRestrictedUnpickler:
     def test_allows_networkx_digraph(self, saved_graph_path):
-        graph, metadata = GraphBuilder.load(
-            saved_graph_path, validate_tokenizer=False
-        )
+        graph, metadata = GraphBuilder.load(saved_graph_path, validate_tokenizer=False)
         assert graph is not None
         assert metadata["tokenizer_name"] == TOKENIZER_NAME
 
