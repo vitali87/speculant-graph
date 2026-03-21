@@ -158,9 +158,12 @@ class TestNextTokenDistribution:
 
     def test_temperature_affects_distribution(self, small_graph, tokenizer):
         decoder = _make_decoder(small_graph, tokenizer)
-        decoder.last_logits = torch.randn(1, VOCAB_SIZE)
+        torch.manual_seed(42)
+        fixed_logits = torch.randn(1, VOCAB_SIZE)
+        decoder.last_logits = fixed_logits.clone()
 
         probs_low_t = decoder._next_token_distribution(0.1)
+        decoder.last_logits = fixed_logits.clone()
         probs_high_t = decoder._next_token_distribution(10.0)
 
         # Low temperature should be more peaked (lower entropy)
@@ -214,7 +217,7 @@ class TestVerifyDraft:
         assert rejected == 1
         assert has_corr is True
         assert len(tokens) == 1  # correction token sampled
-        assert tokens[0] != 50  # not the rejected token
+        assert tokens[0] == 3  # should sample the high-probability token
 
     def test_sampling_strategy(self, small_graph, tokenizer):
         random.seed(0)
@@ -244,19 +247,21 @@ class TestVerifyDraft:
         decoder = _make_decoder(small_graph, tokenizer)
         decoder._prime_verifier_state(torch.tensor([[1]]))
 
-        # Make all draft tokens very likely
-        logits = torch.full((1, VOCAB_SIZE), -10.0)
-        logits[0, 2] = 10.0
-        logits[0, 3] = 10.0
-        logits[0, 4] = 10.0
+        # Make draft token 2 near-certain so it's always accepted
+        logits = torch.full((1, VOCAB_SIZE), -100.0)
+        logits[0, 2] = 100.0
         decoder.last_logits = logits
 
-        # Need model to return fresh logits after each append
+        # Return fresh logits after each append, rotating dominant token
+        draft_sequence = [3, 4]
+        call_count = [0]
+
         def mock_model_call(**kwargs):
-            output_logits = torch.full((1, 1, VOCAB_SIZE), -10.0)
-            output_logits[0, 0, 2] = 10.0
-            output_logits[0, 0, 3] = 10.0
-            output_logits[0, 0, 4] = 10.0
+            idx = call_count[0]
+            call_count[0] += 1
+            output_logits = torch.full((1, 1, VOCAB_SIZE), -100.0)
+            if idx < len(draft_sequence):
+                output_logits[0, 0, draft_sequence[idx]] = 100.0
             past_kv = ((torch.randn(1, 1, 4, 8), torch.randn(1, 1, 4, 8)),)
             return SimpleNamespace(logits=output_logits, past_key_values=past_kv)
 
@@ -273,8 +278,12 @@ class TestVerifyDraft:
             1.0,
         )
 
-        assert accepted + rejected == 3
-        assert len(positions) == accepted
+        assert accepted == 3
+        assert rejected == 0
+        assert tokens == [2, 3, 4]
+        assert positions == [0, 1, 2]
+        # model called once in _prime_verifier_state + 3 times in _append_token
+        assert decoder.model.call_count == 4
 
 
 class TestGenerateFromVerifier:
