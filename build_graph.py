@@ -192,11 +192,7 @@ Examples:
         )
 
     except Exception as e:
-        logger.error(f"Failed to build graph: {e}")
-        import traceback
-
-        if args.verbose:
-            traceback.print_exc()
+        logger.exception(f"Failed to build graph: {e}")
         sys.exit(1)
 
 

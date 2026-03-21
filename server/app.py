@@ -62,7 +62,7 @@ async def lifespan(app: FastAPI):
         app.state.draft_config = dconfig
         logger.info("Model loaded!")
         logger.info(f"Ready: http://{app.state.args.host}:{app.state.args.port}")
-    except Exception as e:
+    except (FileNotFoundError, ValueError, RuntimeError, OSError) as e:
         logger.exception(f"Failed to initialize: {e}")
         sys.exit(1)
 
@@ -108,7 +108,7 @@ async def generate(request: GenerateRequest):
             num_rejected=result.num_rejected,
             total_tokens=result.total_tokens,
         )
-    except Exception as e:
+    except (RuntimeError, ValueError) as e:
         logger.exception("Generation failed")
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e))
 

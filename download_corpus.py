@@ -1,4 +1,5 @@
 import argparse
+import sys
 from pathlib import Path
 
 from loguru import logger
@@ -126,9 +127,12 @@ def main():
 
     try:
         run_downloads(args.corpus, args.output_dir, args.max_docs)
-    except Exception as e:
+    except (OSError, ConnectionError) as e:
         logger.error(f"Error downloading corpus: {e}")
-        return
+        sys.exit(1)
+    except KeyboardInterrupt:
+        logger.warning("Download interrupted by user")
+        sys.exit(130)
 
     logger.success("Download complete!")
     logger.info("\nNext steps:")
