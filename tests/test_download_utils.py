@@ -16,11 +16,15 @@ class TestConfigureDownloadMode:
         configure_download_mode("default")
         assert "HF_HUB_ENABLE_HF_TRANSFER" not in os.environ
 
-    def test_hf_transfer_without_package(self):
-        # hf_transfer likely not installed in test env, so it should fallback
+    def test_hf_transfer_package_handling(self):
+        import importlib.util
+
         configure_download_mode("hf_transfer")
-        # Either it's set (if hf_transfer installed) or cleared (if not)
-        # Both are valid outcomes
+
+        if importlib.util.find_spec("hf_transfer"):
+            assert os.environ.get("HF_HUB_ENABLE_HF_TRANSFER") == "1"
+        else:
+            assert "HF_HUB_ENABLE_HF_TRANSFER" not in os.environ
 
     def test_invalid_mode_raises(self):
         with pytest.raises(ValueError, match="Invalid download_mode"):

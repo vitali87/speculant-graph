@@ -79,17 +79,9 @@ def saved_graph_path(small_graph, tmp_path):
 
     graph, context_index = small_graph
 
-    builder = GraphBuilder.__new__(GraphBuilder)
+    builder = GraphBuilder(tokenizer_name=TOKENIZER_NAME, max_order=3)
     builder.graph = graph
     builder.context_index = context_index
-    builder.tokenizer_name = TOKENIZER_NAME
-    builder.max_order = 3
-    builder.tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_NAME)
-    builder.token_counts = {}
-    builder.ngram_transition_counts = {}
-    for node in graph.nodes():
-        if isinstance(node, int):
-            builder.token_counts[node] = graph.nodes[node].get("count", 0)
 
     filepath = str(tmp_path / "test_graph.pkl")
     builder.save(filepath)
