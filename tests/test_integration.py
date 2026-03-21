@@ -1,13 +1,11 @@
-import os
-import tempfile
 
 import pytest
 
-from speculant_graph.config import DraftConfig, GenerationConfig, GraphConfig
+from speculant_graph.config import DraftConfig
 from speculant_graph.draft_generator import DraftGenerator, DraftResult
 from speculant_graph.graph_builder import GraphBuilder
 
-from conftest import TOKENIZER_NAME, SAMPLE_CORPUS, SAMPLE_CORPUS_2
+from conftest import TOKENIZER_NAME
 
 
 class TestGraphBuildAndDraft:

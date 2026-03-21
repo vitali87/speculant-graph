@@ -1,12 +1,11 @@
 import os
-import tempfile
 
 import networkx as nx
 import pytest
 
 from speculant_graph.graph_builder import GraphBuilder
 
-from conftest import TOKENIZER_NAME, SAMPLE_CORPUS, SAMPLE_CORPUS_2
+from conftest import TOKENIZER_NAME
 
 
 class TestGraphBuilderInit:

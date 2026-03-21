@@ -4,7 +4,7 @@ import pickle
 
 import pytest
 
-from speculant_graph.graph_builder import GraphBuilder, _RestrictedUnpickler
+from speculant_graph.graph_builder import GraphBuilder
 
 from conftest import TOKENIZER_NAME
 
