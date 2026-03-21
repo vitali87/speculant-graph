@@ -99,22 +99,23 @@ class GraphBuilder:
             while True:
                 raw = f.read(self._READ_CHUNK_CHARS)
                 if not raw:
-                    # Process any remaining leftover text
+                    final_token_ids = []
                     if leftover:
-                        token_ids = self.tokenizer.encode(
+                        final_token_ids = self.tokenizer.encode(
                             leftover, add_special_tokens=False
                         )
-                        if is_last_file and self.tokenizer.eos_token_id is not None:
-                            token_ids.append(self.tokenizer.eos_token_id)
-                        carry_over = self._process_token_chunk(
-                            token_ids, carry_over
+
+                    if is_last_file and self.tokenizer.eos_token_id is not None:
+                        final_token_ids.append(self.tokenizer.eos_token_id)
+                        logger.debug(
+                            f"Added EOS token: {self.tokenizer.eos_token_id}"
                         )
-                        total_token_count += len(token_ids)
-                    elif is_last_file and self.tokenizer.eos_token_id is not None:
+
+                    if final_token_ids:
                         carry_over = self._process_token_chunk(
-                            [self.tokenizer.eos_token_id], carry_over
+                            final_token_ids, carry_over
                         )
-                        total_token_count += 1
+                        total_token_count += len(final_token_ids)
                     break
 
                 pbar.update(len(raw.encode("utf-8")))
@@ -122,7 +123,7 @@ class GraphBuilder:
 
                 # Split at last whitespace to avoid cutting words
                 last_ws = text.rfind(" ")
-                if last_ws == -1 or not f.readable():
+                if last_ws == -1:
                     chunk_text = text
                     leftover = ""
                 else:
@@ -134,9 +135,6 @@ class GraphBuilder:
                 )
                 carry_over = self._process_token_chunk(token_ids, carry_over)
                 total_token_count += len(token_ids)
-
-        if is_last_file and self.tokenizer.eos_token_id is not None:
-            logger.debug(f"Added EOS token: {self.tokenizer.eos_token_id}")
 
         logger.info(
             f"Tokenized {total_token_count:,} tokens from {path.name}"
