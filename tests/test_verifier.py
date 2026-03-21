@@ -318,14 +318,21 @@ class TestPrepareInputIds:
         input_ids = decoder._prepare_input_ids("")
 
         assert input_ids.shape == (1, 1)
-        # Should use BOS, EOS, PAD, or most frequent token
         token_id = input_ids[0, 0].item()
         special_ids = [
-            tokenizer.bos_token_id,
-            tokenizer.eos_token_id,
-            tokenizer.pad_token_id,
+            sid
+            for sid in [
+                tokenizer.bos_token_id,
+                tokenizer.eos_token_id,
+                tokenizer.pad_token_id,
+            ]
+            if sid is not None
         ]
-        assert token_id in special_ids or isinstance(token_id, int)
+        # Should use a special token, or most frequent token if none defined
+        if special_ids:
+            assert token_id in special_ids
+        else:
+            assert token_id == decoder.draft_generator.get_most_frequent_token()
 
 
 class TestGenerate:
@@ -396,7 +403,7 @@ class TestGenerateStream:
             assert isinstance(text, str)
             assert isinstance(token_ids, list)
 
-    def test_stream_result_matches_generate(self, small_graph, tokenizer):
+    def test_generate_stream_returns_valid_result(self, small_graph, tokenizer):
         decoder = _make_decoder(small_graph, tokenizer)
         config = GenerationConfig(max_tokens=3, temperature=1.0, seed=42)
 
