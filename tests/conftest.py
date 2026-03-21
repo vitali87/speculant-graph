@@ -50,8 +50,8 @@ def empty_corpus_file(tmp_path):
 
 
 @pytest.fixture(scope="session")
-def small_graph(tokenizer):
-    """Build a small graph from sample corpus for reuse across tests."""
+def small_graph_builder(tokenizer):
+    """Build a small graph from sample corpus, returning the builder for reuse."""
     from speculant_graph.graph_builder import GraphBuilder
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
@@ -64,27 +64,24 @@ def small_graph(tokenizer):
             max_order=3,
             chunk_size=500,
         )
-        graph = builder.build_from_files([corpus_path])
-        context_index = builder.context_index
+        builder.build_from_files([corpus_path])
     finally:
         os.unlink(corpus_path)
 
-    return graph, context_index
+    return builder
+
+
+@pytest.fixture(scope="session")
+def small_graph(small_graph_builder):
+    """Return (graph, context_index) tuple from the session-scoped builder."""
+    return small_graph_builder.graph, small_graph_builder.context_index
 
 
 @pytest.fixture
-def saved_graph_path(small_graph, tmp_path):
+def saved_graph_path(small_graph_builder, tmp_path):
     """Save the small graph to a pickle file and return the path."""
-    from speculant_graph.graph_builder import GraphBuilder
-
-    graph, context_index = small_graph
-
-    builder = GraphBuilder(tokenizer_name=TOKENIZER_NAME, max_order=3)
-    builder.graph = graph
-    builder.context_index = context_index
-
     filepath = str(tmp_path / "test_graph.pkl")
-    builder.save(filepath)
+    small_graph_builder.save(filepath)
     return filepath
 
 
