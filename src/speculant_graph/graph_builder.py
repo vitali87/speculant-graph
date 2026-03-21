@@ -74,6 +74,8 @@ class GraphBuilder:
         )
         return self.graph
 
+    _READ_CHUNK_CHARS = 1_000_000  # 1MB text chunks for streaming file reads
+
     def _process_file(
         self, file_path: str, prev_context: list[int], is_last_file: bool
     ) -> list[int]:
@@ -82,59 +84,104 @@ class GraphBuilder:
         if not path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
 
-        with open(path, "r", encoding="utf-8") as f:
-            text = f.read()
+        file_size = path.stat().st_size
+        total_token_count = 0
+        carry_over = prev_context.copy()
 
-        all_token_ids = self.tokenizer.encode(text, add_special_tokens=False)
+        with open(path, "r", encoding="utf-8") as f, tqdm(
+            total=file_size,
+            desc=f"  Reading {path.name}",
+            unit="B",
+            unit_scale=True,
+            leave=False,
+        ) as pbar:
+            leftover = ""
+            while True:
+                raw = f.read(self._READ_CHUNK_CHARS)
+                if not raw:
+                    # Process any remaining leftover text
+                    if leftover:
+                        token_ids = self.tokenizer.encode(
+                            leftover, add_special_tokens=False
+                        )
+                        if is_last_file and self.tokenizer.eos_token_id is not None:
+                            token_ids.append(self.tokenizer.eos_token_id)
+                        carry_over = self._process_token_chunk(
+                            token_ids, carry_over
+                        )
+                        total_token_count += len(token_ids)
+                    elif is_last_file and self.tokenizer.eos_token_id is not None:
+                        carry_over = self._process_token_chunk(
+                            [self.tokenizer.eos_token_id], carry_over
+                        )
+                        total_token_count += 1
+                    break
+
+                pbar.update(len(raw.encode("utf-8")))
+                text = leftover + raw
+
+                # Split at last whitespace to avoid cutting words
+                last_ws = text.rfind(" ")
+                if last_ws == -1 or not f.readable():
+                    chunk_text = text
+                    leftover = ""
+                else:
+                    chunk_text = text[:last_ws]
+                    leftover = text[last_ws:]
+
+                token_ids = self.tokenizer.encode(
+                    chunk_text, add_special_tokens=False
+                )
+                carry_over = self._process_token_chunk(token_ids, carry_over)
+                total_token_count += len(token_ids)
 
         if is_last_file and self.tokenizer.eos_token_id is not None:
-            all_token_ids.append(self.tokenizer.eos_token_id)
             logger.debug(f"Added EOS token: {self.tokenizer.eos_token_id}")
 
         logger.info(
-            f"Tokenized {len(all_token_ids):,} tokens from {Path(file_path).name}"
+            f"Tokenized {total_token_count:,} tokens from {path.name}"
         )
 
-        combined_tokens = prev_context + all_token_ids
+        return (
+            carry_over[-(self.max_order - 1) :]
+            if len(carry_over) >= self.max_order - 1
+            else carry_over
+        )
 
-        for token_id in all_token_ids:
+    def _process_token_chunk(
+        self, token_ids: list[int], prev_context: list[int]
+    ) -> list[int]:
+        combined_tokens = prev_context + token_ids
+
+        for token_id in token_ids:
             self.token_counts[token_id] = self.token_counts.get(token_id, 0) + 1
 
         chunk_overlap = self.max_order - 1
-        num_chunks = (len(combined_tokens) + self.chunk_size - 1) // self.chunk_size
+        for chunk_start in range(0, len(combined_tokens), self.chunk_size):
+            chunk_end = min(
+                chunk_start + self.chunk_size + chunk_overlap, len(combined_tokens)
+            )
+            chunk_tokens = combined_tokens[chunk_start:chunk_end]
 
-        with tqdm(
-            total=num_chunks,
-            desc="  Processing chunks",
-            unit="chunk",
-            leave=False,
-        ) as pbar:
-            for chunk_start in range(0, len(combined_tokens), self.chunk_size):
-                chunk_end = min(
-                    chunk_start + self.chunk_size + chunk_overlap, len(combined_tokens)
-                )
-                chunk_tokens = combined_tokens[chunk_start:chunk_end]
+            for order in range(1, self.max_order + 1):
+                for i in range(len(chunk_tokens) - order):
+                    context = tuple(chunk_tokens[i : i + order])
+                    next_token = chunk_tokens[i + order]
 
-                for order in range(1, self.max_order + 1):
-                    for i in range(len(chunk_tokens) - order):
-                        context = tuple(chunk_tokens[i : i + order])
-                        next_token = chunk_tokens[i + order]
+                    if context not in self.ngram_transition_counts:
+                        self.ngram_transition_counts[context] = {}
 
-                        if context not in self.ngram_transition_counts:
-                            self.ngram_transition_counts[context] = {}
+                    self.ngram_transition_counts[context][next_token] = (
+                        self.ngram_transition_counts[context].get(next_token, 0) + 1
+                    )
 
-                        self.ngram_transition_counts[context][next_token] = (
-                            self.ngram_transition_counts[context].get(next_token, 0) + 1
-                        )
+                    self.context_index[context] = order
 
-                        self.context_index[context] = order
-
-                pbar.update(1)
-
+        # Return the tail needed for cross-chunk context continuity
         return (
-            all_token_ids[-(self.max_order - 1) :]
-            if len(all_token_ids) >= self.max_order - 1
-            else all_token_ids
+            combined_tokens[-(self.max_order - 1) :]
+            if len(combined_tokens) >= self.max_order - 1
+            else combined_tokens
         )
 
     def _calculate_probabilities(self) -> None:
