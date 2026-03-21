@@ -6,7 +6,7 @@ def remove_non_va_comments(filepath: Path) -> bool:
     try:
         with open(filepath, encoding="utf-8") as f:
             lines = f.readlines()
-    except Exception:
+    except (OSError, UnicodeDecodeError):
         return False
 
     new_lines = []
@@ -31,7 +31,7 @@ def check_comments(filepath: Path) -> list[str]:
     try:
         with open(filepath, encoding="utf-8") as f:
             lines = f.readlines()
-    except Exception:
+    except (OSError, UnicodeDecodeError):
         return []
     for line_no, line in enumerate(lines, start=1):
         stripped = line.strip()
