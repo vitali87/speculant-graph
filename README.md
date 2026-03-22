@@ -12,6 +12,9 @@
   <a href="https://github.com/vitali87/speculant-graph/watchers"><img src="https://img.shields.io/github/watchers/vitali87/speculant-graph?style=social" alt="GitHub watchers"></a>
   <a href="https://github.com/vitali87/speculant-graph/issues"><img src="https://img.shields.io/github/issues/vitali87/speculant-graph" alt="GitHub issues"></a>
   <a href="https://github.com/vitali87/speculant-graph/blob/main/LICENSE"><img src="https://img.shields.io/github/license/vitali87/speculant-graph" alt="License"></a>
+  <a href="https://gitcgr.com/vitali87/speculant-graph">
+    <img src="https://gitcgr.com/badge/vitali87/speculant-graph.svg" alt="gitcgr" />
+  </a>
   <img src="https://img.shields.io/github/languages/top/vitali87/speculant-graph" alt="Top language">
   <img src="https://img.shields.io/github/last-commit/vitali87/speculant-graph" alt="Last commit">
 </p>
