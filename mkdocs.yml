@@ -1,0 +1,50 @@
+site_name: Speculant Graph
+site_description: Graph drafts, LLM verifies — speculative decoding with n-gram graphs
+repo_url: https://github.com/vitali87/speculant-graph
+repo_name: vitali87/speculant-graph
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: deep purple
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: deep purple
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.expand
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - API Reference:
+      - Configuration: api/config.md
+      - Graph Builder: api/graph-builder.md
+      - Draft Generator: api/draft-generator.md
+      - Verifier: api/verifier.md
+  - Architecture: architecture.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            show_source: true
+            show_root_heading: true
+            members_order: source
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - admonition
+  - pymdownx.details
