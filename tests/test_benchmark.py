@@ -155,6 +155,7 @@ class TestDraftGenerationPerformance:
 class TestContextLookupPerformance:
     def test_context_index_lookup_speed(self, perf_graph):
         contexts = list(perf_graph.context_index.keys())[:1000]
+        assert contexts, "context_index is empty — graph was not built correctly"
 
         start = time.perf_counter()
         for _ in range(1000):
