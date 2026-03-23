@@ -1,6 +1,7 @@
 import time
 
 import pytest
+from transformers import AutoTokenizer
 
 from speculant_graph.config import DraftConfig
 from speculant_graph.draft_generator import DraftGenerator
@@ -12,43 +13,29 @@ PERF_CORPUS = SAMPLE_CORPUS * 20  # ~3k words for meaningful timing
 
 
 @pytest.fixture(scope="module")
-def perf_graph():
-    import tempfile
-    import os
+def perf_graph(tmp_path_factory):
+    path = tmp_path_factory.mktemp("perf") / "corpus.txt"
+    path.write_text(PERF_CORPUS)
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-        f.write(PERF_CORPUS)
-        path = f.name
-
-    try:
-        builder = GraphBuilder(
-            tokenizer_name=TOKENIZER_NAME, max_order=5, chunk_size=5000
-        )
-        builder.build_from_files([path])
-    finally:
-        os.unlink(path)
-
+    builder = GraphBuilder(tokenizer_name=TOKENIZER_NAME, max_order=5, chunk_size=5000)
+    builder.build_from_files([str(path)])
     return builder
 
 
 class TestGraphBuildPerformance:
     def test_build_completes_under_threshold(self, tmp_path):
-        import tempfile
-        import os
+        path = tmp_path / "perf_corpus.txt"
+        path.write_text(PERF_CORPUS)
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-            f.write(PERF_CORPUS)
-            path = f.name
+        # Pre-load tokenizer so download time isn't included
+        AutoTokenizer.from_pretrained(TOKENIZER_NAME)
 
-        try:
-            start = time.perf_counter()
-            builder = GraphBuilder(
-                tokenizer_name=TOKENIZER_NAME, max_order=5, chunk_size=5000
-            )
-            builder.build_from_files([path])
-            duration = time.perf_counter() - start
-        finally:
-            os.unlink(path)
+        start = time.perf_counter()
+        builder = GraphBuilder(
+            tokenizer_name=TOKENIZER_NAME, max_order=5, chunk_size=5000
+        )
+        builder.build_from_files([str(path)])
+        duration = time.perf_counter() - start
 
         print(f"\nGraph build: {duration:.3f}s")
         print(f"  Nodes: {builder.graph.number_of_nodes()}")
@@ -145,12 +132,14 @@ class TestDraftGenerationPerformance:
             tokenizer=tokenizer,
         )
 
+        prompts = ["The cat sat on", "A bird flew over", "The dog ran in"]
         total_tokens = 0
         start = time.perf_counter()
 
-        for _ in range(300):
-            result = gen.generate("The cat sat on", k=20, strategy="sampling")
-            total_tokens += result.actual_length
+        for prompt in prompts:
+            for _ in range(100):
+                result = gen.generate(prompt, k=20, strategy="sampling")
+                total_tokens += result.actual_length
 
         duration = time.perf_counter() - start
         throughput = total_tokens / duration

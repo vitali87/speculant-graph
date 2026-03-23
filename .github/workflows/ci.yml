@@ -73,7 +73,7 @@ jobs:
         run: uv sync --extra dev
 
       - name: Run tests with coverage
-        run: uv run pytest tests/ -v --tb=short --cov=speculant_graph --cov-report=term-missing --cov-fail-under=85
+        run: uv run pytest tests/ --ignore=tests/test_benchmark.py -v --tb=short --cov=speculant_graph --cov-report=term-missing --cov-fail-under=85
 
   benchmark:
     runs-on: ubuntu-latest
