@@ -15,6 +15,8 @@
   <a href="https://gitcgr.com/vitali87/speculant-graph">
     <img src="https://gitcgr.com/badge/vitali87/speculant-graph.svg" alt="gitcgr" />
   </a>
+  <a href="https://github.com/vitali87/speculant-graph/actions/workflows/ci.yml"><img src="https://github.com/vitali87/speculant-graph/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/coverage-%E2%89%A585%25-brightgreen" alt="Coverage ≥85%">
   <img src="https://img.shields.io/github/languages/top/vitali87/speculant-graph" alt="Top language">
   <img src="https://img.shields.io/github/last-commit/vitali87/speculant-graph" alt="Last commit">
 </p>
