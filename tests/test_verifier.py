@@ -435,7 +435,7 @@ class TestGenerateEdgeCases:
         assert result.total_tokens > 0
         assert result.acceptance_rate == 0.0
 
-    def test_all_drafts_rejected_generates_fallback(self, small_graph, tokenizer):
+    def test_all_drafts_rejected_samples_correction(self, small_graph, tokenizer):
         random.seed(42)
         decoder = _make_decoder(small_graph, tokenizer)
         decoder._prime_verifier_state(torch.tensor([[1]]))
@@ -467,7 +467,7 @@ class TestGenerateEdgeCases:
         result = decoder.generate("The cat", config)
         assert isinstance(result, GenerationResult)
 
-    def test_generate_with_accepted_and_correction(self, small_graph, tokenizer):
+    def test_generate_with_draft_verification(self, small_graph, tokenizer):
         random.seed(0)
         decoder = _make_decoder(small_graph, tokenizer)
         config = GenerationConfig(max_tokens=5, temperature=1.0, seed=42)
@@ -502,7 +502,7 @@ class TestSamplingVerification:
         assert accepted == 1
         assert tokens[0] == 5
 
-    def test_sampling_residual_fallback(self, small_graph, tokenizer):
+    def test_sampling_rejection_correction(self, small_graph, tokenizer):
         random.seed(42)
         decoder = _make_decoder(small_graph, tokenizer)
         decoder._prime_verifier_state(torch.tensor([[1]]))
@@ -526,6 +526,30 @@ class TestSamplingVerification:
         assert rejected == 1
         assert has_corr is True
         assert tokens[0] == 99
+
+    def test_sampling_zero_residual_fallback(self, small_graph, tokenizer):
+        random.seed(42)
+        decoder = _make_decoder(small_graph, tokenizer)
+        decoder._prime_verifier_state(torch.tensor([[1]]))
+
+        logits = torch.full((1, VOCAB_SIZE), -100.0)
+        logits[0, 99] = 100.0
+        decoder.last_logits = logits
+
+        accepted, rejected, tokens, has_corr, positions = decoder._verify_draft(
+            [1],
+            [7],
+            [0.9],
+            [(1,)],
+            [[99]],
+            [[1.0]],
+            "sampling",
+            1.0,
+        )
+
+        assert accepted == 0
+        assert rejected == 1
+        assert has_corr is True
 
 
 class TestPrepareInputIdsFallbackChain:
