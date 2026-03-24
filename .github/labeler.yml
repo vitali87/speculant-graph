@@ -24,7 +24,6 @@ server:
 config:
   - changed-files:
       - any-glob-to-any-file:
-          - "pyproject.toml"
           - ".pre-commit-config.yaml"
 
 dependencies:
