@@ -1,0 +1,34 @@
+ci:
+  - changed-files:
+      - any-glob-to-any-file: ".github/**"
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file: "tests/**"
+
+docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "docs/**"
+          - "mkdocs.yml"
+          - "README.md"
+
+core:
+  - changed-files:
+      - any-glob-to-any-file: "src/speculant_graph/**"
+
+server:
+  - changed-files:
+      - any-glob-to-any-file: "server/**"
+
+config:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "pyproject.toml"
+          - ".pre-commit-config.yaml"
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "pyproject.toml"
+          - "uv.lock"
