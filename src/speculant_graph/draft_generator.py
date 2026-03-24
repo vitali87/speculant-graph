@@ -116,7 +116,7 @@ class DraftGenerator:
                     current_context
                 )
 
-                if matched_order == 0 or context_tuple is None:
+                if context_tuple is None:
                     logger.debug("No matching context, stopping draft")
                     break
 
