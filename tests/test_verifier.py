@@ -508,13 +508,13 @@ class TestSamplingVerification:
         decoder._prime_verifier_state(torch.tensor([[1]]))
 
         logits = torch.full((1, VOCAB_SIZE), -100.0)
-        logits[0, 7] = 100.0
+        logits[0, 99] = 100.0
         decoder.last_logits = logits
 
         accepted, rejected, tokens, has_corr, positions = decoder._verify_draft(
             [1],
             [7],
-            [0.99],
+            [0.9],
             [(1,)],
             [[7, 8]],
             [[0.5, 0.5]],
@@ -522,49 +522,42 @@ class TestSamplingVerification:
             1.0,
         )
 
-        assert len(tokens) >= 1
+        assert accepted == 0
+        assert rejected == 1
+        assert has_corr is True
+        assert tokens[0] == 99
 
 
 class TestPrepareInputIdsFallbackChain:
-    def test_eos_fallback_when_no_bos(self, small_graph, tokenizer):
+    def test_eos_fallback_when_no_bos(self, small_graph, tokenizer, monkeypatch):
         decoder = _make_decoder(small_graph, tokenizer)
-        original_bos = decoder.tokenizer.bos_token_id
-        decoder.tokenizer.bos_token_id = None
+        monkeypatch.setattr(decoder.tokenizer, "bos_token_id", None)
 
         input_ids = decoder._prepare_input_ids("")
 
-        decoder.tokenizer.bos_token_id = original_bos
         assert input_ids.shape == (1, 1)
-        token_id = input_ids[0, 0].item()
-        assert token_id == tokenizer.eos_token_id
+        assert input_ids[0, 0].item() == tokenizer.eos_token_id
 
-    def test_pad_fallback_when_no_bos_or_eos(self, small_graph, tokenizer):
+    def test_pad_fallback_when_no_bos_or_eos(self, small_graph, tokenizer, monkeypatch):
         decoder = _make_decoder(small_graph, tokenizer)
-        original_bos = decoder.tokenizer.bos_token_id
-        original_eos = decoder.tokenizer.eos_token_id
-        decoder.tokenizer.bos_token_id = None
-        decoder.tokenizer.eos_token_id = None
+        monkeypatch.setattr(decoder.tokenizer, "bos_token_id", None)
+        monkeypatch.setattr(decoder.tokenizer, "eos_token_id", None)
+        monkeypatch.setattr(decoder.tokenizer, "pad_token_id", 0)
 
         input_ids = decoder._prepare_input_ids("")
 
-        decoder.tokenizer.bos_token_id = original_bos
-        decoder.tokenizer.eos_token_id = original_eos
         assert input_ids.shape == (1, 1)
+        assert input_ids[0, 0].item() == 0
 
-    def test_most_frequent_fallback(self, small_graph, tokenizer):
+    def test_most_frequent_fallback(self, small_graph, tokenizer, monkeypatch):
         decoder = _make_decoder(small_graph, tokenizer)
-        original_bos = decoder.tokenizer.bos_token_id
-        original_eos = decoder.tokenizer.eos_token_id
-        original_pad = decoder.tokenizer.pad_token_id
-        decoder.tokenizer.bos_token_id = None
-        decoder.tokenizer.eos_token_id = None
-        decoder.tokenizer.pad_token_id = None
+        monkeypatch.setattr(decoder.tokenizer, "bos_token_id", None)
+        monkeypatch.setattr(decoder.tokenizer, "eos_token_id", None)
+        monkeypatch.setattr(decoder.tokenizer, "pad_token_id", None)
 
         input_ids = decoder._prepare_input_ids("")
 
-        decoder.tokenizer.bos_token_id = original_bos
-        decoder.tokenizer.eos_token_id = original_eos
-        decoder.tokenizer.pad_token_id = original_pad
         assert input_ids.shape == (1, 1)
-        token_id = input_ids[0, 0].item()
-        assert token_id == decoder.draft_generator.get_most_frequent_token()
+        assert (
+            input_ids[0, 0].item() == decoder.draft_generator.get_most_frequent_token()
+        )
