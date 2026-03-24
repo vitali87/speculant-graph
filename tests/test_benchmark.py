@@ -27,7 +27,6 @@ class TestGraphBuildPerformance:
         path = tmp_path / "perf_corpus.txt"
         path.write_text(PERF_CORPUS)
 
-        # Pre-load tokenizer so download time isn't included
         AutoTokenizer.from_pretrained(TOKENIZER_NAME)
 
         start = time.perf_counter()
@@ -42,7 +41,6 @@ class TestGraphBuildPerformance:
         print(f"  Edges: {builder.graph.number_of_edges()}")
         print(f"  Contexts: {len(builder.context_index)}")
 
-        # Should complete in reasonable time (generous for CI)
         assert duration < 60, f"Graph build took {duration:.1f}s, expected <60s"
 
     def test_save_load_roundtrip_performance(self, perf_graph, tmp_path):
@@ -123,7 +121,6 @@ class TestDraftGenerationPerformance:
         print(f"\nAttentive mix draft: {total_tokens} tokens in {duration:.3f}s")
         print(f"  Throughput: {throughput:.0f} tokens/sec")
 
-        # Attentive mix is slower but should still be reasonable
         assert throughput > 50, (
             f"Attentive throughput {throughput:.0f} tok/s, expected >50"
         )
