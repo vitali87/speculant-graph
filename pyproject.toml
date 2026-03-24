@@ -27,6 +27,7 @@ dev = [
     "pytest>=8.4.2",
     "pytest-cov>=7.0.0",
     "ruff>=0.14.1",
+    "pyright>=1.1.0",
 ]
 server = [
     "fastapi>=0.119.0",
@@ -58,6 +59,11 @@ lint.ignore = [
     "D",      # pydocstyle (all docstring rules)
     "E501",   # line-too-long (for comments and code)
 ]
+
+[tool.pyright]
+include = ["src/speculant_graph"]
+pythonVersion = "3.13"
+typeCheckingMode = "basic"
 
 [dependency-groups]
 dev = [

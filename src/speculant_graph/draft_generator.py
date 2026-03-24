@@ -94,7 +94,7 @@ class DraftGenerator:
                     break
 
                 if strategy == "greedy":
-                    next_tok = max(q_mix, key=q_mix.get)
+                    next_tok = max(q_mix, key=lambda k: q_mix[k])
                     next_prob = 1.0
                 else:
                     toks, probs = list(q_mix.keys()), list(q_mix.values())
@@ -116,7 +116,7 @@ class DraftGenerator:
                     current_context
                 )
 
-                if matched_order == 0:
+                if matched_order == 0 or context_tuple is None:
                     logger.debug("No matching context, stopping draft")
                     break
 
