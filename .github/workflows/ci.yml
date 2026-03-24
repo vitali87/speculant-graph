@@ -75,6 +75,7 @@ jobs:
           path: ~/.cache/huggingface
           key: hf-${{ runner.os }}-${{ hashFiles('tests/conftest.py') }}
           restore-keys: hf-${{ runner.os }}-
+          save-always: true
 
       - name: Install dependencies
         run: uv sync --extra dev
@@ -104,6 +105,7 @@ jobs:
           path: ~/.cache/huggingface
           key: hf-${{ runner.os }}-${{ hashFiles('tests/conftest.py') }}
           restore-keys: hf-${{ runner.os }}-
+          save-always: true
 
       - name: Install dependencies
         run: uv sync --extra dev
