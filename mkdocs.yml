@@ -1,5 +1,6 @@
 site_name: Speculant Graph
 site_description: Graph drafts, LLM verifies — speculative decoding with n-gram graphs
+site_url: https://vitali87.github.io/speculant-graph/
 repo_url: https://github.com/vitali87/speculant-graph
 repo_name: vitali87/speculant-graph
 

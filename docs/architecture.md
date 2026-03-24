@@ -24,7 +24,7 @@
 When enabled (default), blends multiple order contexts with attention weights:
 
 1. Find all matching orders
-2. Compute score: `β·log(o) + λ·log(count) - α·H` for each
+2. Compute score: `β·log(o) + λ·log(count+1) - α·H` for each
 3. Apply softmax to get attention weights
 4. Weighted average of all distributions
 
