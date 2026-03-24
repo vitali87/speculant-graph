@@ -83,7 +83,9 @@ class TestDraftGenerationPerformance:
                 total_tokens += result.actual_length
 
         duration = time.perf_counter() - start
-        assert total_tokens > 0, "No tokens generated — check graph coverage for test prompts"
+        assert total_tokens > 0, (
+            "No tokens generated — check graph coverage for test prompts"
+        )
         throughput = total_tokens / duration
 
         print(f"\nGreedy draft: {total_tokens} tokens in {duration:.3f}s")
@@ -113,7 +115,9 @@ class TestDraftGenerationPerformance:
                 total_tokens += result.actual_length
 
         duration = time.perf_counter() - start
-        assert total_tokens > 0, "No tokens generated — check graph coverage for test prompts"
+        assert total_tokens > 0, (
+            "No tokens generated — check graph coverage for test prompts"
+        )
         throughput = total_tokens / duration
 
         print(f"\nAttentive mix draft: {total_tokens} tokens in {duration:.3f}s")
@@ -144,7 +148,9 @@ class TestDraftGenerationPerformance:
                 total_tokens += result.actual_length
 
         duration = time.perf_counter() - start
-        assert total_tokens > 0, "No tokens generated — check graph coverage for test prompts"
+        assert total_tokens > 0, (
+            "No tokens generated — check graph coverage for test prompts"
+        )
         throughput = total_tokens / duration
 
         print(f"\nSampling draft: {total_tokens} tokens in {duration:.3f}s")
