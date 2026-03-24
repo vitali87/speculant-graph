@@ -94,7 +94,7 @@ class DraftGenerator:
                     break
 
                 if strategy == "greedy":
-                    next_tok = max(q_mix, key=lambda k: q_mix[k])
+                    next_tok = max(q_mix, key=lambda tok: q_mix[tok])
                     next_prob = 1.0
                 else:
                     toks, probs = list(q_mix.keys()), list(q_mix.values())

@@ -27,7 +27,7 @@ dev = [
     "pytest>=8.4.2",
     "pytest-cov>=7.0.0",
     "ruff>=0.14.1",
-    "pyright>=1.1.0",
+    "pyright>=1.1.400,<2",
 ]
 server = [
     "fastapi>=0.119.0",
