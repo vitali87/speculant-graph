@@ -338,10 +338,6 @@ class TestMixContexts:
             tokenizer_name=TOKENIZER_NAME,
         )
 
-        # Context [10, 20] matches both order-2 (10,20) and order-1 (20,)
-        # Order-2 predicts token 30 with prob 1.0
-        # Order-1 (20,) predicts token 30 with prob 1.0
-        # Both agree, so token 30 should dominate
         dist = gen._mix_contexts([10, 20])
         assert 30 in dist
         assert dist[30] > 0.9

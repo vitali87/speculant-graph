@@ -60,7 +60,6 @@ class TestRestrictedUnpickler:
 
 
 def _build_exploit_pickle(func, arg):
-    """Build a malicious pickle payload that calls func(arg)."""
     buf = io.BytesIO()
     pickler = pickle.Pickler(buf, protocol=pickle.HIGHEST_PROTOCOL)
     pickler.dump(_ExploitHelper(func, arg))
@@ -68,8 +67,6 @@ def _build_exploit_pickle(func, arg):
 
 
 class _ExploitHelper:
-    """Helper class that pickles as a function call for testing."""
-
     def __init__(self, func, arg):
         self.func = func
         self.arg = arg

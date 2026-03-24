@@ -51,7 +51,6 @@ def empty_corpus_file(tmp_path):
 
 @pytest.fixture(scope="session")
 def small_graph_builder(tokenizer):
-    """Build a small graph from sample corpus, returning the builder for reuse."""
     from speculant_graph.graph_builder import GraphBuilder
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
@@ -73,13 +72,11 @@ def small_graph_builder(tokenizer):
 
 @pytest.fixture(scope="session")
 def small_graph(small_graph_builder):
-    """Return (graph, context_index) tuple from the session-scoped builder."""
     return small_graph_builder.graph, small_graph_builder.context_index
 
 
 @pytest.fixture
 def saved_graph_path(small_graph_builder, tmp_path):
-    """Save the small graph to a pickle file and return the path."""
     filepath = str(tmp_path / "test_graph.pkl")
     small_graph_builder.save(filepath)
     return filepath
@@ -101,7 +98,6 @@ def draft_config_sampling():
 
 
 def build_simple_graph():
-    """Build a minimal hand-crafted graph for deterministic tests."""
     g = nx.DiGraph()
 
     g.add_node(10, token_id=10, text="the", count=10)

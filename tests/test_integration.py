@@ -8,8 +8,6 @@ from conftest import TOKENIZER_NAME
 
 
 class TestGraphBuildAndDraft:
-    """Integration tests: build graph from corpus then generate drafts."""
-
     def test_build_and_draft_greedy(self, corpus_file, tokenizer):
         builder = GraphBuilder(
             tokenizer_name=TOKENIZER_NAME, max_order=3, chunk_size=500
@@ -98,8 +96,6 @@ class TestGraphBuildAndDraft:
 
 
 class TestMultiFileGraph:
-    """Integration tests with multiple corpus files."""
-
     def test_multi_file_graph_has_more_coverage(
         self, corpus_file, corpus_file_2, tokenizer
     ):
@@ -132,18 +128,14 @@ class TestMultiFileGraph:
             tokenizer=tokenizer,
         )
 
-        # Try a prompt from first corpus
         result1 = gen.generate("The cat", k=3, strategy="greedy")
         assert isinstance(result1, DraftResult)
 
-        # Try a prompt from second corpus
         result2 = gen.generate("Machine learning", k=3, strategy="greedy")
         assert isinstance(result2, DraftResult)
 
 
 class TestGraphOrderVariations:
-    """Test different max_order settings."""
-
     @pytest.mark.parametrize("max_order", [1, 2, 3, 5])
     def test_different_orders(self, corpus_file, tokenizer, max_order):
         builder = GraphBuilder(
@@ -156,7 +148,6 @@ class TestGraphOrderVariations:
         assert graph.number_of_nodes() > 0
         assert graph.number_of_edges() > 0
 
-        # Verify no context exceeds max_order
         for ctx in builder.context_index:
             assert len(ctx) <= max_order
 
@@ -172,8 +163,6 @@ class TestGraphOrderVariations:
 
 
 class TestDraftStrategies:
-    """Compare greedy vs sampling strategies on same graph."""
-
     def test_greedy_is_deterministic(self, small_graph, tokenizer):
         graph, context_index = small_graph
         gen = DraftGenerator(
@@ -219,8 +208,6 @@ class TestDraftStrategies:
 
 
 class TestAttentiveMixIntegration:
-    """Test attentive mixing with various config params."""
-
     def test_low_temperature_sharpens(self, small_graph, tokenizer):
         graph, context_index = small_graph
         gen = DraftGenerator(
@@ -274,8 +261,6 @@ class TestAttentiveMixIntegration:
 
 
 class TestEdgeCases:
-    """Test edge cases in the full pipeline."""
-
     def test_very_short_prompt(self, small_graph, tokenizer):
         graph, context_index = small_graph
         gen = DraftGenerator(
@@ -324,12 +309,9 @@ class TestEdgeCases:
         )
         result = gen.generate("The cat sat on the mat", k=1000, strategy="greedy")
         assert isinstance(result, DraftResult)
-        # Graph may have cycles allowing full generation, or terminate early
-        # Either way, should produce a valid result
         assert result.actual_length <= 1000
 
     def test_chunk_size_one(self, corpus_file, tokenizer):
-        """Test graph building with very small chunk size."""
         builder = GraphBuilder(tokenizer_name=TOKENIZER_NAME, max_order=2, chunk_size=1)
         graph = builder.build_from_files([corpus_file])
         assert graph.number_of_nodes() > 0

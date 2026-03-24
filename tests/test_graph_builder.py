@@ -135,8 +135,6 @@ class TestBuildFromFiles:
             tokenizer_name=TOKENIZER_NAME, max_order=2, chunk_size=500
         )
         graph = builder.build_from_files([empty_corpus_file])
-        # Empty file may still have BOS/EOS token edges depending on tokenizer
-        # but should have very few nodes compared to a real corpus
         token_nodes = [n for n in graph.nodes() if isinstance(n, int)]
         assert len(token_nodes) <= 2  # at most BOS and EOS
 

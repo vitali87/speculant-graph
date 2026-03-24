@@ -124,7 +124,6 @@ class GraphBuilder:
                 pbar.update(len(raw.encode("utf-8")))
                 text = leftover + raw
 
-                # Split at last whitespace to avoid cutting words
                 last_ws = text.rfind(" ")
                 if last_ws > 0:
                     chunk_text = text[:last_ws]
@@ -174,7 +173,6 @@ class GraphBuilder:
 
                     self.context_index[context] = order
 
-        # Return the tail needed for cross-chunk context continuity
         return (
             combined_tokens[-(self.max_order - 1) :]
             if len(combined_tokens) >= self.max_order - 1

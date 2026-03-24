@@ -19,7 +19,6 @@ def _make_mock_model_output(batch_size=1, seq_len=1, vocab_size=VOCAB_SIZE):
 
 
 def _make_decoder(small_graph, tokenizer):
-    """Create a SpeculativeDecoder with mocked model, bypassing __init__."""
     graph, context_index = small_graph
     from speculant_graph.draft_generator import DraftGenerator
 
@@ -166,7 +165,6 @@ class TestNextTokenDistribution:
         decoder.last_logits = fixed_logits.clone()
         probs_high_t = decoder._next_token_distribution(10.0)
 
-        # Low temperature should be more peaked (lower entropy)
         assert probs_low_t.max() > probs_high_t.max()
 
 
@@ -184,7 +182,6 @@ class TestVerifyDraft:
         decoder = _make_decoder(small_graph, tokenizer)
         decoder._prime_verifier_state(torch.tensor([[1]]))
 
-        # Set logits so draft token 2 has very high probability
         logits = torch.full((1, VOCAB_SIZE), -10.0)
         logits[0, 2] = 10.0
         decoder.last_logits = logits
@@ -203,7 +200,6 @@ class TestVerifyDraft:
         decoder = _make_decoder(small_graph, tokenizer)
         decoder._prime_verifier_state(torch.tensor([[1]]))
 
-        # Set logits so draft token 50 has zero probability
         logits = torch.full((1, VOCAB_SIZE), -10.0)
         logits[0, 3] = 10.0  # token 3 is likely
         logits[0, 50] = -100.0  # draft token 50 is very unlikely
@@ -247,12 +243,10 @@ class TestVerifyDraft:
         decoder = _make_decoder(small_graph, tokenizer)
         decoder._prime_verifier_state(torch.tensor([[1]]))
 
-        # Make draft token 2 near-certain so it's always accepted
         logits = torch.full((1, VOCAB_SIZE), -100.0)
         logits[0, 2] = 100.0
         decoder.last_logits = logits
 
-        # Return fresh logits after each append, rotating dominant token
         draft_sequence = [3, 4]
         call_count = [0]
 
@@ -282,7 +276,6 @@ class TestVerifyDraft:
         assert rejected == 0
         assert tokens == [2, 3, 4]
         assert positions == [0, 1, 2]
-        # model called once in _prime_verifier_state + 3 times in _append_token
         assert decoder.model.call_count == 4
 
 
@@ -337,7 +330,6 @@ class TestPrepareInputIds:
             ]
             if sid is not None
         ]
-        # Should use a special token, or most frequent token if none defined
         if special_ids:
             assert token_id in special_ids
         else:
@@ -369,7 +361,6 @@ class TestGenerate:
         decoder = _make_decoder(small_graph, tokenizer)
         config = GenerationConfig(max_tokens=5, temperature=1.0, seed=123)
 
-        # Need consistent model outputs for reproducibility
         def mock_model_call(**kwargs):
             torch.manual_seed(0)
             output = _make_mock_model_output()
@@ -401,10 +392,8 @@ class TestGenerateStream:
         chunks = list(decoder.generate_stream("The cat", config))
 
         assert len(chunks) > 0
-        # Last yield should be a GenerationResult
         assert isinstance(chunks[-1], GenerationResult)
 
-        # All other yields should be (text, token_ids) tuples
         for chunk in chunks[:-1]:
             assert isinstance(chunk, tuple)
             assert len(chunk) == 2
@@ -416,7 +405,6 @@ class TestGenerateStream:
         decoder = _make_decoder(small_graph, tokenizer)
         config = GenerationConfig(max_tokens=3, temperature=1.0, seed=42)
 
-        # Collect stream result
         stream_result = None
         for chunk in decoder.generate_stream("The cat", config):
             if isinstance(chunk, GenerationResult):
