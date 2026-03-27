@@ -6,7 +6,7 @@ from loguru import logger
 def configure_download_mode(mode: Literal["auto", "hf_transfer", "default"]) -> None:
     if mode == "hf_transfer":
         try:
-            import hf_transfer  # noqa: F401
+            import hf_transfer  # noqa: F401  # pyright: ignore[reportMissingImports]
 
             os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
             logger.info(

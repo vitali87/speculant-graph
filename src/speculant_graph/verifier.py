@@ -70,7 +70,7 @@ class SpeculativeDecoder:
             self.device = verifier_config.device or (
                 "cuda" if torch.cuda.is_available() else "cpu"
             )
-            self.model.to(self.device)
+            self.model.to(self.device)  # pyright: ignore[reportArgumentType]
             logger.info(f"Model loaded on device: {self.device}")
 
         logger.info(f"Loading n-gram graph from: {graph_path}")
@@ -498,7 +498,7 @@ class SpeculativeDecoder:
             residual_sum = residual.sum().item()
             if residual_sum > 0.0:
                 residual = residual / residual_sum
-                corrected_token = torch.multinomial(residual, num_samples=1).item()
+                corrected_token = int(torch.multinomial(residual, num_samples=1).item())
                 accepted_tokens.append(corrected_token)
                 has_correction = True
                 self._append_token(corrected_token)
@@ -523,7 +523,7 @@ class SpeculativeDecoder:
 
         for _ in range(count):
             probs = self._next_token_distribution(temperature)
-            next_token = torch.multinomial(probs, num_samples=1).item()
+            next_token = int(torch.multinomial(probs, num_samples=1).item())
             generated.append(next_token)
             self._append_token(next_token)
 
