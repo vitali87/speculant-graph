@@ -413,3 +413,175 @@ class TestGenerateStream:
         assert stream_result is not None
         assert stream_result.total_tokens > 0
         assert isinstance(stream_result.text, str)
+
+    def test_stream_empty_draft_falls_back_to_verifier(self, small_graph, tokenizer):
+        decoder = _make_decoder(small_graph, tokenizer)
+        config = GenerationConfig(max_tokens=2, temperature=1.0, seed=42)
+
+        chunks = list(decoder.generate_stream("xyzzy foobar blargh", config))
+
+        assert isinstance(chunks[-1], GenerationResult)
+        assert chunks[-1].total_tokens > 0
+
+
+class TestGenerateEdgeCases:
+    def test_empty_draft_falls_back_to_verifier(self, small_graph, tokenizer):
+        decoder = _make_decoder(small_graph, tokenizer)
+        config = GenerationConfig(max_tokens=2, temperature=1.0, seed=42)
+
+        result = decoder.generate("xyzzy foobar blargh", config)
+
+        assert isinstance(result, GenerationResult)
+        assert result.total_tokens > 0
+        assert result.acceptance_rate == 0.0
+
+    def test_all_drafts_rejected_samples_correction(self, small_graph, tokenizer):
+        random.seed(42)
+        decoder = _make_decoder(small_graph, tokenizer)
+        decoder._prime_verifier_state(torch.tensor([[1]]))
+
+        logits = torch.full((1, VOCAB_SIZE), -100.0)
+        logits[0, 99] = 100.0
+        decoder.last_logits = logits
+
+        accepted, rejected, tokens, has_corr, positions = decoder._verify_draft(
+            [1],
+            [50],
+            [1.0],
+            [(1,)],
+            [[50]],
+            [[1.0]],
+            "greedy",
+            1.0,
+        )
+
+        assert accepted == 0
+        assert rejected == 1
+        assert has_corr is True
+        assert tokens[0] == 99
+
+    def test_generate_without_seed(self, small_graph, tokenizer):
+        decoder = _make_decoder(small_graph, tokenizer)
+        config = GenerationConfig(max_tokens=3, temperature=1.0, seed=None)
+
+        result = decoder.generate("The cat", config)
+        assert isinstance(result, GenerationResult)
+
+    def test_generate_with_draft_verification(self, small_graph, tokenizer):
+        random.seed(0)
+        decoder = _make_decoder(small_graph, tokenizer)
+        config = GenerationConfig(max_tokens=5, temperature=1.0, seed=42)
+
+        result = decoder.generate("The cat", config)
+
+        assert isinstance(result, GenerationResult)
+        assert result.total_tokens > 0
+
+
+class TestSamplingVerification:
+    def test_sampling_zero_draft_prob_accepts(self, small_graph, tokenizer):
+        random.seed(0)
+        decoder = _make_decoder(small_graph, tokenizer)
+        decoder._prime_verifier_state(torch.tensor([[1]]))
+
+        logits = torch.full((1, VOCAB_SIZE), -10.0)
+        logits[0, 5] = 10.0
+        decoder.last_logits = logits
+
+        accepted, rejected, tokens, has_corr, positions = decoder._verify_draft(
+            [1],
+            [5],
+            [0.0],
+            [(1,)],
+            [[5]],
+            [[0.0]],
+            "sampling",
+            1.0,
+        )
+
+        assert accepted == 1
+        assert tokens[0] == 5
+
+    def test_sampling_rejection_correction(self, small_graph, tokenizer):
+        random.seed(42)
+        decoder = _make_decoder(small_graph, tokenizer)
+        decoder._prime_verifier_state(torch.tensor([[1]]))
+
+        logits = torch.full((1, VOCAB_SIZE), -100.0)
+        logits[0, 99] = 100.0
+        decoder.last_logits = logits
+
+        accepted, rejected, tokens, has_corr, positions = decoder._verify_draft(
+            [1],
+            [7],
+            [0.9],
+            [(1,)],
+            [[7, 8]],
+            [[0.5, 0.5]],
+            "sampling",
+            1.0,
+        )
+
+        assert accepted == 0
+        assert rejected == 1
+        assert has_corr is True
+        assert tokens[0] == 99
+
+    def test_sampling_zero_residual_fallback(self, small_graph, tokenizer):
+        random.seed(42)
+        decoder = _make_decoder(small_graph, tokenizer)
+        decoder._prime_verifier_state(torch.tensor([[1]]))
+
+        logits = torch.full((1, VOCAB_SIZE), -100.0)
+        logits[0, 99] = 100.0
+        decoder.last_logits = logits
+
+        accepted, rejected, tokens, has_corr, positions = decoder._verify_draft(
+            [1],
+            [7],
+            [0.9],
+            [(1,)],
+            [[99]],
+            [[1.0]],
+            "sampling",
+            1.0,
+        )
+
+        assert accepted == 0
+        assert rejected == 1
+        assert has_corr is True
+
+
+class TestPrepareInputIdsFallbackChain:
+    def test_eos_fallback_when_no_bos(self, small_graph, tokenizer, monkeypatch):
+        decoder = _make_decoder(small_graph, tokenizer)
+        monkeypatch.setattr(decoder.tokenizer, "bos_token_id", None)
+
+        input_ids = decoder._prepare_input_ids("")
+
+        assert input_ids.shape == (1, 1)
+        assert input_ids[0, 0].item() == tokenizer.eos_token_id
+
+    def test_pad_fallback_when_no_bos_or_eos(self, small_graph, tokenizer, monkeypatch):
+        decoder = _make_decoder(small_graph, tokenizer)
+        monkeypatch.setattr(decoder.tokenizer, "bos_token_id", None)
+        monkeypatch.setattr(decoder.tokenizer, "eos_token_id", None)
+        monkeypatch.setattr(decoder.tokenizer, "pad_token_id", 0)
+
+        input_ids = decoder._prepare_input_ids("")
+
+        assert input_ids.shape == (1, 1)
+        assert input_ids[0, 0].item() == 0
+
+    def test_most_frequent_fallback(self, small_graph, tokenizer, monkeypatch):
+        decoder = _make_decoder(small_graph, tokenizer)
+        monkeypatch.setattr(decoder.tokenizer, "bos_token_id", None)
+        monkeypatch.setattr(decoder.tokenizer, "eos_token_id", None)
+        monkeypatch.setattr(decoder.tokenizer, "pad_token_id", None)
+
+        input_ids = decoder._prepare_input_ids("")
+
+        assert input_ids.shape == (1, 1)
+        assert (
+            input_ids[0, 0].item() == decoder.draft_generator.get_most_frequent_token()
+        )
