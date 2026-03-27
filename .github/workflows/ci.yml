@@ -69,6 +69,14 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Cache HuggingFace tokenizers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-${{ runner.os }}-${{ hashFiles('tests/conftest.py') }}
+          restore-keys: hf-${{ runner.os }}-
+          save-always: true
+
       - name: Install dependencies
         run: uv sync --extra dev
 
@@ -90,6 +98,14 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+
+      - name: Cache HuggingFace tokenizers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-${{ runner.os }}-${{ hashFiles('tests/conftest.py') }}
+          restore-keys: hf-${{ runner.os }}-
+          save-always: true
 
       - name: Install dependencies
         run: uv sync --extra dev
