@@ -6,8 +6,8 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "networkx>=3.5",
-    "transformers>=4.57.1, <5.0.0",
-    "torch>=2.8.0",
+    "transformers>=5.5.0,<6.0.0",
+    "torch>=2.13.0",
     "numpy>=2.3.3",
     "loguru>=0.7.3",
     "pydantic>=2.12.0",
@@ -24,7 +24,7 @@ check-comments = "scripts.check_comments:main"
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.4.2",
+    "pytest>=9.0.3",
     "pytest-cov>=7.0.0",
     "ruff>=0.14.1",
     "pyright>=1.1.400,<2",
